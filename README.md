@@ -132,4 +132,6 @@ python comfyui_triton_sageattention.py --install --verbose
 
 ## License
 
+comfyui_triton_sageattention.py, Copyright (C) 2025 Dustin Darcy
+
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.

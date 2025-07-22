@@ -1,15 +1,14 @@
-# These owners will be the default owners for everything in
-# the repo. Unless a later match takes precedence,
-# Dustin will be requested for review when someone opens a pull request.
-*       @Dustin
+# This file defines code ownership for automatic PR review requests
 
-# Core implementation
-*.js    @Dustin
-*.py    @Dustin
+# Global owners - will be requested for review on all changes
+*       @djdarcy
+
+# Python files
+*.py    @djdarcy
 
 # Documentation
-/docs/   @Dustin
-*.md     @Dustin
+/docs/   @djdarcy
+*.md     @djdarcy
 
 # GitHub CI/CD
-/.github/ @Dustin
+/.github/ @djdarcy

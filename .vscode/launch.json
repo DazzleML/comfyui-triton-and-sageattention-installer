@@ -1,45 +1,75 @@
 {
-    // Use IntelliSense to learn about possible attributes.
-    // Hover to view descriptions of existing attributes.
-    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Python: Current File",
+            "name": "Install (Normal)",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/comfyui_triton_sageattention.py",
+            "args": ["--install"],
+            "console": "integratedTerminal",
+            "justMyCode": false
+        },
+        {
+            "name": "Install (Verbose)",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/comfyui_triton_sageattention.py",
+            "args": ["--install", "--verbose"],
+            "console": "integratedTerminal",
+            "justMyCode": false
+        },
+        {
+            "name": "Install (Custom Path)",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/comfyui_triton_sageattention.py",
+            "args": ["--install", "--base-path", "${input:comfyuiPath}"],
+            "console": "integratedTerminal",
+            "justMyCode": false
+        },
+        {
+            "name": "Cleanup",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/comfyui_triton_sageattention.py",
+            "args": ["--cleanup"],
+            "console": "integratedTerminal",
+            "justMyCode": false
+        },
+        {
+            "name": "Show Help",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/comfyui_triton_sageattention.py",
+            "args": ["--help"],
+            "console": "integratedTerminal",
+            "justMyCode": false
+        },
+        {
+            "name": "Show Version",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/comfyui_triton_sageattention.py",
+            "args": ["--version"],
+            "console": "integratedTerminal",
+            "justMyCode": false
+        },
+        {
+            "name": "Debug Current File",
             "type": "python",
             "request": "launch",
             "program": "${file}",
             "console": "integratedTerminal",
-            "justMyCode": true
-        },
-        {
-            "name": "Python: Module",
-            "type": "python",
-            "request": "launch",
-            "module": "comfyui-triton-sageattention-installer",
-            "console": "integratedTerminal",
-            "justMyCode": true
-        },
-        {
-            "name": "Python: Current File with Arguments",
-            "type": "python",
-            "request": "launch",
-            "program": "${file}",
-            "console": "integratedTerminal",
-            "args": [
-                // Add your arguments here
-                // Examples:
-                // "--input", "${workspaceFolder}/data/input.txt",
-                // "--output", "${workspaceFolder}/data/output.txt",
-                // Use VS Code's input picker to add arguments at runtime
-                "${command:pickArgs}"
-            ]
+            "justMyCode": false
         }
     ],
-    "compounds": [
+    "inputs": [
         {
-            "name": "Server/Client",
-            "configurations": ["Python: Module", "Python: Current File"]
+            "id": "comfyuiPath",
+            "type": "promptString",
+            "description": "Enter the path to your ComfyUI installation",
+            "default": "C:\\ComfyUI_windows_portable"
         }
     ]
 }
