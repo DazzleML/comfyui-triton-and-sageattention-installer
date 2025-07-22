@@ -27,6 +27,9 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 
+# Version information
+__version__ = "0.5.0"
+
 
 class ComfyUIInstallerError(Exception):
     """Base exception for installer errors."""
@@ -1504,6 +1507,12 @@ Examples:
         "--non-interactive",
         action="store_true",
         help="Run in non-interactive mode (no user prompts, safer defaults)"
+    )
+    
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {__version__}"
     )
     
     args = parser.parse_args()
