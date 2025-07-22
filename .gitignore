@@ -1,0 +1,141 @@
+# Enhanced .gitignore for RepoKit Projects
+# This template provides comprehensive exclusions for various languages and tools
+
+#######################
+# Common ignored files #
+#######################
+.DS_Store
+Thumbs.db
+desktop.ini
+*.log
+*.tmp
+*.bak
+*.swp
+*~
+*.*~
+
+#######################
+# Project Directories #
+#######################
+
+# RepoKit standard private directories
+/private/
+/convos/
+/logs/
+/credentials/
+/secrets/
+**/__private__*
+
+# Local development files
+local/
+.local/
+.dev/
+
+#######################
+# Python              #
+#######################
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Distribution / packaging
+dist/
+build/
+develop-eggs/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+venv/
+env/
+ENV/
+.env/
+.venv/
+env.bak/
+venv.bak/
+pythonenv*
+
+# Testing / coverage
+.tox/
+.coverage
+.coverage.*
+.cache/
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+cover/
+htmlcov/
+
+#######################
+# IDEs and Editors    #
+#######################
+
+# Visual Studio Code
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+*.code-workspace
+.history/
+
+# JetBrains
+.idea/
+*.iml
+*.ipr
+*.iws
+.idea_modules/
+out/
+
+# Environment files
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+#######################
+# Security & Secrets  #
+#######################
+
+# Token and credential files
+*token*
+*credential*
+*secret*
+*password*
+.env
+.secret
+credentials.json
+*auth*.json
+*config*.json
+
+# Project-specific directories
+/log/
+/logs/
+/private/
+/convos/
+
+#######################
+# Project Specific    #
+#######################
+
+# Add custom patterns below

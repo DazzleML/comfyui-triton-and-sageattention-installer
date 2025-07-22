@@ -1,0 +1,8 @@
+# Project dependencies
+# Add your dependencies here
+
+# Development dependencies
+pytest>=7.0.0
+black>=23.0.0
+flake8>=6.0.0
+mypy>=1.0.0

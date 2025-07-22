@@ -1,0 +1,45 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python: Current File",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+        {
+            "name": "Python: Module",
+            "type": "python",
+            "request": "launch",
+            "module": "comfyui-triton-sageattention-installer",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+        {
+            "name": "Python: Current File with Arguments",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "args": [
+                // Add your arguments here
+                // Examples:
+                // "--input", "${workspaceFolder}/data/input.txt",
+                // "--output", "${workspaceFolder}/data/output.txt",
+                // Use VS Code's input picker to add arguments at runtime
+                "${command:pickArgs}"
+            ]
+        }
+    ],
+    "compounds": [
+        {
+            "name": "Server/Client",
+            "configurations": ["Python: Module", "Python: Current File"]
+        }
+    ]
+}
