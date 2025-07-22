@@ -1,17 +1,17 @@
 # ComfyUI Triton and SageAttention Installer
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![Windows](https://img.shields.io/badge/platform-Windows-blue.svg)](https://www.microsoft.com/windows)
 [![CUDA 11.8+](https://img.shields.io/badge/CUDA-11.8+-green.svg)](https://developer.nvidia.com/cuda-downloads)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 Cross-platform installer for Triton and SageAttention on ComfyUI. Simplifies GPU-accelerated inference setup for Windows users with automated dependency management and RTX 5090 support.
 
-## 🚀 Overview
+## Overview
 
 Installing SageAttention on Windows has been notoriously difficult due to compilation issues, missing dependencies, and platform-specific challenges. This installer automates the entire process, making advanced GPU optimizations accessible to all ComfyUI users.
 
-## ✨ Features
+## Features
 
 - **One-command installation** - No manual compilation or complex setup required
 - **Windows-first design** - Specifically addresses Windows compilation challenges  
@@ -23,14 +23,14 @@ Installing SageAttention on Windows has been notoriously difficult due to compil
 - **Graceful fallbacks** - Continues installation even if some components fail
 - **Detailed logging** - Comprehensive logs for troubleshooting
 
-## 📋 Prerequisites
+## Prerequisites
 
 - Windows 10/11 (stubs for Linux/macOS experimental)
 - NVIDIA GPU with CUDA support
 - Existing ComfyUI installation
 - Python 3.8+ (or ComfyUI portable's embedded Python)
 
-## 🔧 Installation
+## Installation
 
 ### Quick Start
 
@@ -51,7 +51,7 @@ python comfyui_triton_sageattention.py --install --base-path C:\path\to\comfyui
 python comfyui_triton_sageattention.py --cleanup
 ```
 
-## 💻 Usage
+## Usage
 
 After installation, run ComfyUI with SageAttention enabled:
 
@@ -63,7 +63,7 @@ run_nvidia_gpu.bat
 python ComfyUI\main.py --use-sage-attention
 ```
 
-## 🏗️ What Gets Installed
+## What Gets Installed
 
 1. **PyTorch** with CUDA support matching your GPU
 2. **Triton-Windows** - OpenAI's Triton for Windows
@@ -74,7 +74,7 @@ python ComfyUI\main.py --use-sage-attention
    - flow2-wan-video
    - ComfyUI-VideoHelperSuite
 
-## 🐛 Troubleshooting
+## Troubleshooting
 
 ### Common Issues
 
@@ -93,7 +93,7 @@ python ComfyUI\main.py --use-sage-attention
 ### Logs
 Check `comfyui_install.log` for detailed information.
 
-## 🤝 Contributing
+## Contributing
 
 Contributions are welcome! Feel free to submit a pull request.
 
@@ -110,7 +110,7 @@ cd comfyui-triton-and-sageattention-installer
 python comfyui_triton_sageattention.py --install --verbose
 ```
 
-## 📚 How It Works
+## How It Works
 
 1. Detects platform and creates appropriate handler
 2. Installs Visual Studio Build Tools (Windows)
@@ -122,7 +122,7 @@ python comfyui_triton_sageattention.py --install --verbose
 8. Clones required repositories
 9. Creates launch scripts
 
-## 🙏 Acknowledgments
+## Acknowledgments
 
 - [woct0rdho](https://github.com/woct0rdho) - Windows wheels and triton-windows
 - [thu-ml](https://github.com/thu-ml/SageAttention) - SageAttention project
@@ -130,6 +130,6 @@ python comfyui_triton_sageattention.py --install --verbose
 - ComfyUI community - Testing and feedback
 
 
-## 📄 License
+## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
