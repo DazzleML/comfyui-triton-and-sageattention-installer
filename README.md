@@ -122,11 +122,25 @@ python comfyui_triton_sageattention.py --install --verbose
 8. Clones required repositories
 9. Creates launch scripts
 
+## Additional Tools
+
+### AI Toolkit RTX 5090 Support
+
+This repository also includes an installer for [Ostris AI Toolkit](https://github.com/ostris/ai-toolkit) users with RTX 5090 GPUs. The AI Toolkit installer (`ai_toolkit_rtx5090_installer.py`) addresses Blackwell architecture compatibility issues for LoRA training:
+
+```bash
+# From your AI Toolkit directory
+python ai_toolkit_rtx5090_installer.py --non-interactive
+```
+
+See [docs/ai_toolkit_rtx5090_setup.md](docs/ai_toolkit_rtx5090_setup.md) for details.
+
 ## Acknowledgments
 
 - [woct0rdho](https://github.com/woct0rdho) - Windows wheels and triton-windows
 - [thu-ml](https://github.com/thu-ml/SageAttention) - SageAttention project
 - [ComfyUI](https://github.com/comfyanonymous/ComfyUI) - The amazing UI
+- [Ostris](https://github.com/ostris/ai-toolkit) - AI Toolkit for LoRA training
 - ComfyUI community - Testing and feedback
 
 
