@@ -37,6 +37,7 @@ Installing SageAttention on Windows has been notoriously difficult due to compil
 ```bash
 python comfyui_triton_sageattention.py --install
 ```
+By default `comfyui_triton_sageattention.py` tries to install SageAttention 2, and falls back to 1 if unavailable.
 
 ### Installation Options
 
@@ -56,25 +57,12 @@ python comfyui_triton_sageattention.py --cleanup
 Control which SageAttention version gets installed:
 
 ```bash
-# Default: try SageAttention 2, fall back to 1 if unavailable
-python comfyui_triton_sageattention.py --install
-
-# Explicitly install SageAttention 2 (~3x speedup) - fail if unavailable
-python comfyui_triton_sageattention.py --install --sage-version 2
-
-# Explicitly install SageAttention 1 (~2.1x speedup, more compatible)
-python comfyui_triton_sageattention.py --install --sage-version 1
+# Explicitly install SageAttention 1 (~2.1x speedup, more compatible) or 2 (~3x speedup) & fails if unavailable
+python comfyui_triton_sageattention.py --install --sage-version 1  # or 2
 
 # Advanced: install specific version
 python comfyui_triton_sageattention.py --install --sage-version 2.1.1
 ```
-
-| Flag | Behavior |
-|------|----------|
-| `--sage-version auto` | Try SA2, fallback to SA1 (default) |
-| `--sage-version 2` | Install SA2, fail if unavailable |
-| `--sage-version 1` | Install SA1 directly |
-| `--sage-version X.Y.Z` | Install exact version (advanced) |
 
 ## Usage
 
