@@ -31,6 +31,46 @@ from typing import Dict, List, Optional, Tuple, Union
 __version__ = "0.5.0"
 
 
+def parse_sage_version(version_str: str) -> Tuple[Optional[int], Optional[str]]:
+    """Parse --sage-version argument into (major, exact) tuple.
+
+    Args:
+        version_str: User input like "auto", "1", "2", "1.0.6", "2.1.1"
+
+    Returns:
+        Tuple of (major_version: int|None, exact_version: str|None)
+        - (None, None) for auto mode
+        - (1, None) for "1"
+        - (2, None) for "2"
+        - (1, "1.0.6") for exact 1.x version
+        - (2, "2.1.1") for exact 2.x version
+
+    Raises:
+        ValueError: If version string is invalid
+    """
+    version_str = version_str.strip().lower()
+
+    if version_str == "auto":
+        return (None, None)
+
+    if version_str == "1":
+        return (1, None)
+
+    if version_str == "2":
+        return (2, None)
+
+    # Check for exact version (e.g., "1.0.6", "2.1.1")
+    match = re.match(r'^([12])\.(\d+)\.(\d+)$', version_str)
+    if match:
+        major = int(match.group(1))
+        return (major, version_str)
+
+    raise ValueError(
+        f"Invalid --sage-version: '{version_str}'. "
+        f"Use 'auto', '1', '2', or exact version like '1.0.6' or '2.1.1'"
+    )
+
+
 class ComfyUIInstallerError(Exception):
     """Base exception for installer errors."""
     pass
@@ -836,10 +876,13 @@ class ComfyUIInstaller:
         "torch", "torchvision", "torchaudio"
     ]
     
-    def __init__(self, base_path: Optional[Path] = None, verbose: bool = False, interactive: bool = True, force: bool = False):
+    def __init__(self, base_path: Optional[Path] = None, verbose: bool = False, interactive: bool = True, force: bool = False, sage_version: str = "auto"):
         self.base_path = base_path or Path.cwd()
         self.interactive = interactive
         self.force = force
+        # Parse sage_version into (major, exact) tuple
+        self.sage_version_raw = sage_version
+        self.sage_version_major, self.sage_version_exact = parse_sage_version(sage_version)
         self.setup_logging(verbose)
         self.handler = self._create_platform_handler()
         self.installed_packages = []
@@ -1125,113 +1168,186 @@ class ComfyUIInstaller:
         
         self.logger.debug("Python development files appear complete")
         return True
-    
+
+    def _get_system_info_string(self) -> str:
+        """Get formatted system info for error messages."""
+        try:
+            torch_ver = self._get_torch_version()
+            cuda_ver = self._get_cuda_version_from_torch()
+            python_ver = f"{sys.version_info.major}.{sys.version_info.minor}"
+            return f"PyTorch: {torch_ver}, CUDA: {cuda_ver}, Python: {python_ver}"
+        except Exception:
+            return "Could not detect versions"
+
+    def _try_install_sageattention_v2(self, exact_version: Optional[str] = None) -> bool:
+        """Attempt to install SageAttention 2.x from pre-built wheel.
+
+        Args:
+            exact_version: If specified, only try this exact version (e.g., "2.1.1")
+
+        Returns:
+            True if installation succeeded, False otherwise.
+        """
+        if platform.system() != "Windows":
+            self.logger.info("SageAttention 2.x pre-built wheels only available on Windows")
+            return False
+
+        try:
+            torch_ver = self._get_torch_version()
+            cuda_ver = self._get_cuda_version_from_torch()
+            python_ver = f"{sys.version_info.major}{sys.version_info.minor}"
+
+            print(f"  Detected: PyTorch {torch_ver}, CUDA {cuda_ver}, Python {sys.version_info.major}.{sys.version_info.minor}")
+
+            if exact_version:
+                print(f"  Looking for exact version: {exact_version}")
+            else:
+                print("  Checking for compatible pre-built wheel...")
+
+            # Known working wheel combinations from woct0rdho
+            wheel_configs = [
+                ("2.1.1", "128", "270", "312"),  # CUDA 12.8, PyTorch 2.7.0, Python 3.12
+                ("2.1.1", "126", "260", "312"),  # CUDA 12.6, PyTorch 2.6.0, Python 3.12
+                ("2.0.1", "126", "250", "312"),  # CUDA 12.6, PyTorch 2.5.0, Python 3.12
+                ("2.0.1", "121", "240", "312"),  # CUDA 12.1, PyTorch 2.4.0, Python 3.12
+                ("2.0.1", "118", "240", "311"),  # CUDA 11.8, PyTorch 2.4.0, Python 3.11
+            ]
+
+            for sage_ver, cuda_whl, torch_whl, py_whl in wheel_configs:
+                # Skip if exact version requested and this isn't it
+                if exact_version and sage_ver != exact_version:
+                    continue
+
+                if py_whl != python_ver:
+                    continue  # Skip incompatible Python versions
+
+                wheel_url = f"https://github.com/woct0rdho/SageAttention/releases/download/v{sage_ver}-windows/sageattention-{sage_ver}+cu{cuda_whl}torch{torch_whl[0]}.{torch_whl[1]}.{torch_whl[2]}-cp{py_whl}-cp{py_whl}-win_amd64.whl"
+
+                try:
+                    self.logger.info(f"Trying pre-built wheel: {wheel_url}")
+                    self.handler.pip_install([wheel_url])
+                    self.installed_packages.append("sageattention")
+
+                    print()
+                    print("  " + "-" * 50)
+                    print(f"  [OK] Installed SageAttention {sage_ver} (pre-built wheel)")
+                    print("       -> ~3x faster than FlashAttention2")
+                    print("  " + "-" * 50)
+                    self.logger.info(f"Successfully installed SageAttention {sage_ver} from wheel")
+                    return True
+
+                except Exception as e:
+                    self.logger.debug(f"Wheel not compatible: {e}")
+                    continue
+
+        except Exception as e:
+            self.logger.debug(f"Could not check for pre-built wheels: {e}")
+
+        return False
+
+    def _install_sageattention_v1(self, exact_version: Optional[str] = None, is_fallback: bool = False):
+        """Install SageAttention 1.x from PyPI.
+
+        Args:
+            exact_version: If specified, install this exact version (e.g., "1.0.6")
+            is_fallback: If True, show fallback message. If False, show direct install message.
+        """
+        version = exact_version or "1.0.6"  # Default to 1.0.6 if no exact version
+
+        try:
+            self.handler.pip_install([f"sageattention=={version}"])
+            self.installed_packages.append("sageattention")
+
+            print()
+            print("  " + "-" * 50)
+
+            if is_fallback:
+                print("  [i] No matching SageAttention 2.x wheel found")
+                print(f"  [OK] Installed SageAttention {version} (Triton-based)")
+                print("       -> ~2.1x faster than FlashAttention2")
+                print()
+                print("       For SA2 (~3x speedup), see:")
+                print("       https://github.com/woct0rdho/SageAttention/releases")
+            else:
+                print(f"  [OK] Installed SageAttention {version} (Triton-based)")
+                print("       -> ~2.1x faster than FlashAttention2")
+
+            print("  " + "-" * 50)
+            self.logger.info(f"Successfully installed SageAttention {version} from PyPI")
+
+        except Exception as e:
+            self.logger.error(f"Failed to install SageAttention {version}: {e}")
+            print(f"  [X] Failed to install SageAttention {version}: {e}")
+            raise
+
+    def _fail_sageattention_v2(self):
+        """Print failure message when SA2 explicitly requested but unavailable."""
+        print()
+        print("  " + "-" * 50)
+        print("  [X] SageAttention 2.x installation failed")
+        print()
+        print(f"      No pre-built wheel available for your configuration:")
+        print(f"        {self._get_system_info_string()}")
+        print()
+        print("      Options:")
+        print("        1. Use --sage-version auto to fall back to SA 1.0.6")
+        print("        2. Manually install from:")
+        print("           https://github.com/woct0rdho/SageAttention/releases")
+        print("        3. Open an issue to request this configuration")
+        print("  " + "-" * 50)
+
+        self.logger.error("SageAttention 2.x installation failed - no compatible wheel")
+        raise ComfyUIInstallerError("SageAttention 2.x not available for this configuration")
+
     def clone_and_install_repositories(self):
         """Clone and install required repositories."""
         sage_failed = False
-        
-        # Clone and install SageAttention
-        sage_dir = self.base_path / "SageAttention"
-        
-        # First, try to install from pre-built wheels if available
-        print("Installing SageAttention...")
-        print("Checking for pre-built SageAttention wheels...")
-        
-        # Try woct0rdho's pre-built Windows wheels first
-        if platform.system() == "Windows":
-            try:
-                # Detect PyTorch and CUDA versions
-                torch_ver = self._get_torch_version()
-                cuda_ver = self._get_cuda_version_from_torch()
-                python_ver = f"{sys.version_info.major}{sys.version_info.minor}"
-                
-                # Format versions for wheel names
-                torch_ver_short = torch_ver.replace(".", "")[:3]  # e.g., "2.7.0" -> "270"
-                cuda_ver_short = cuda_ver[:3] if cuda_ver != "cpu" else "cpu"  # e.g., "128" stays "128"
-                
-                # Known working wheel combinations from woct0rdho
-                wheel_configs = [
-                    # Latest versions
-                    ("2.1.1", "128", "270", "312"),  # CUDA 12.8, PyTorch 2.7.0, Python 3.12
-                    ("2.1.1", "126", "260", "312"),  # CUDA 12.6, PyTorch 2.6.0, Python 3.12
-                    ("2.0.1", "126", "250", "312"),  # CUDA 12.6, PyTorch 2.5.0, Python 3.12
-                    # Older versions
-                    ("2.0.1", "121", "240", "312"),  # CUDA 12.1, PyTorch 2.4.0, Python 3.12
-                    ("2.0.1", "118", "240", "311"),  # CUDA 11.8, PyTorch 2.4.0, Python 3.11
-                ]
-                
-                for sage_ver, cuda_whl, torch_whl, py_whl in wheel_configs:
-                    if py_whl != python_ver:
-                        continue  # Skip incompatible Python versions
-                        
-                    wheel_url = f"https://github.com/woct0rdho/SageAttention/releases/download/v{sage_ver}-windows/sageattention-{sage_ver}+cu{cuda_whl}torch{torch_whl[0]}.{torch_whl[1]}.{torch_whl[2]}-cp{py_whl}-cp{py_whl}-win_amd64.whl"
-                    
-                    try:
-                        self.logger.info(f"Trying pre-built wheel: {wheel_url}")
-                        self.handler.pip_install([wheel_url])
-                        self.installed_packages.append("sageattention")
-                        print(f"Successfully installed SageAttention {sage_ver} from pre-built Windows wheel!")
-                        return  # Skip compilation entirely
-                    except Exception as e:
-                        self.logger.debug(f"Wheel not compatible: {e}")
-                        continue
-                        
-            except Exception as e:
-                self.logger.debug(f"Could not use pre-built wheels: {e}")
-        
-        # Fallback to PyPI version
+
+        # ─────────────────────────────────────────────────────────────
+        # Install SageAttention
+        # ─────────────────────────────────────────────────────────────
+        print()
+        print("=" * 60)
+        print("Installing SageAttention")
+        print("=" * 60)
+        print(f"  Requested: --sage-version {self.sage_version_raw}")
+
+        # Determine install strategy based on parsed version
+        major = self.sage_version_major      # None, 1, or 2
+        exact = self.sage_version_exact      # None or "X.Y.Z"
+
         try:
-            # Try installing from PyPI (version 1.0.6 is Triton-based, no compilation needed)
-            self.handler.pip_install(["sageattention==1.0.6"])
-            self.installed_packages.append("sageattention")
-            print("Successfully installed SageAttention 1.0.6 from PyPI!")
-        except Exception as e:
-            self.logger.info("No pre-built wheel found, attempting to compile from source...")
-            
-            # If wheel install failed, try building from source
-            if self._update_or_clone_repo(sage_dir, self.REPOSITORIES["sageattention"], "SageAttention"):
-                print("Building SageAttention from source...")
-                
-                # Simple approach like the batch script - just pip install -e
-                try:
-                    # Match the batch script approach exactly
-                    self.logger.info("Installing SageAttention using pip install -e (matching batch script)")
-                    self.handler.run_command([
-                        str(self.handler.python_path), "-s", "-m", "pip", "install", "-e", str(sage_dir)
-                    ])
-                    self.installed_packages.append("sageattention")
-                    print("Successfully installed SageAttention from source!")
-                except ComfyUIInstallerError as e:
-                    # If simple approach fails, try with environment variables
-                    self.logger.warning("Simple install failed, trying with build environment variables...")
-                    
-                    compile_env = {
-                        **os.environ,
-                        "DISTUTILS_USE_SDK": "1",
-                        "USE_NINJA": "OFF",
-                        "MAX_JOBS": "1",  # Reduce parallel jobs to avoid resource issues
-                        "PYTHONUTF8": "1",
-                        "PYTHONIOENCODING": "utf-8"
-                    }
-                    
-                    try:
-                        result = subprocess.run(
-                            [str(self.handler.python_path), "-m", "pip", "install", "-e", "."],
-                            cwd=str(sage_dir),
-                            env=compile_env,
-                            check=True,
-                            text=True
-                        )
-                        self.installed_packages.append("sageattention")
-                        print("Successfully installed SageAttention with build environment!")
-                    except subprocess.CalledProcessError as e2:
-                        self.logger.error("SageAttention installation failed completely")
-                        self.logger.error("This is likely due to missing CUDA development files or compiler issues")
-                        self.logger.error(f"Error: {e2}")
-                        sage_failed = True
-                        # Don't raise here, continue with other installations
-        
+            if major is None:
+                # Auto mode: try SA2, fallback to SA1
+                print("  Strategy: Try SA2, fallback to SA1")
+                if not self._try_install_sageattention_v2():
+                    self._install_sageattention_v1(is_fallback=True)
+
+            elif major == 1:
+                # SA1 requested (either "1" or "1.0.6")
+                if exact:
+                    print(f"  Strategy: Install exact version {exact}")
+                else:
+                    print("  Strategy: Install latest SA1")
+                self._install_sageattention_v1(exact_version=exact, is_fallback=False)
+
+            elif major == 2:
+                # SA2 requested (either "2" or "2.1.1")
+                if exact:
+                    print(f"  Strategy: Install exact version {exact}")
+                else:
+                    print("  Strategy: Install any compatible SA2")
+
+                if not self._try_install_sageattention_v2(exact_version=exact):
+                    self._fail_sageattention_v2()
+
+        except ComfyUIInstallerError:
+            sage_failed = True
+            # Don't re-raise here, continue with other installations
+
+        # ─────────────────────────────────────────────────────────────
         # Setup ComfyUI custom nodes directory
+        # ─────────────────────────────────────────────────────────────
         comfyui_nodes = self.base_path / "ComfyUI" / "custom_nodes"
         comfyui_nodes.mkdir(parents=True, exist_ok=True)
         
@@ -1508,7 +1624,18 @@ Examples:
         action="store_true",
         help="Run in non-interactive mode (no user prompts, safer defaults)"
     )
-    
+
+    parser.add_argument(
+        "--sage-version",
+        default="auto",
+        metavar="VERSION",
+        help="SageAttention version to install: "
+             "'auto' (try 2.x, fallback to 1.x - default), "
+             "'1' (any 1.x, ~2.1x speedup), "
+             "'2' (any 2.x, ~3x speedup). "
+             "Advanced: use exact version like '2.1.1'"
+    )
+
     parser.add_argument(
         "--version",
         action="version",
@@ -1526,7 +1653,8 @@ Examples:
         base_path=args.base_path,
         verbose=args.verbose,
         interactive=not args.non_interactive,
-        force=args.force
+        force=args.force,
+        sage_version=args.sage_version
     )
     
     success = True
