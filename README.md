@@ -76,6 +76,20 @@ python ComfyUI\main.py --use-sage-attention
 
 ## Troubleshooting
 
+### SageAttention Versions
+
+The installer attempts to install **SageAttention 2.x** (faster, CUDA + Triton) when your PyTorch/CUDA/Python combination matches a pre-configured wheel. If no match is found, it falls back to **SageAttention 1.0.6** (Triton-only).
+
+**Check your installed version:**
+```bash
+python -m pip show sageattention
+```
+
+- Version `1.0.6` = SageAttention 1 (~2.1x speedup vs FlashAttention2)
+- Version `2.x.x` = SageAttention 2 (~3x speedup vs FlashAttention2)
+
+For detailed information about version differences and troubleshooting, see [Discussion #8: Understanding SageAttention Versions](https://github.com/DazzleML/comfyui-triton-and-sageattention-installer/discussions/8).
+
 ### Common Issues
 
 **"No module named 'torch'" during build**
@@ -89,6 +103,11 @@ python ComfyUI\main.py --use-sage-attention
 **CUDA version mismatch**
 - Installer auto-detects your CUDA version
 - Update NVIDIA drivers if issues persist
+
+**Getting SageAttention 1.0.6 instead of 2.x**
+- Your PyTorch/CUDA/Python combo may not have a pre-configured wheel
+- You can manually install from [woct0rdho's releases](https://github.com/woct0rdho/SageAttention/releases)
+- Please open an issue so we can add your configuration
 
 ### Logs
 Check `comfyui_install.log` for detailed information.
