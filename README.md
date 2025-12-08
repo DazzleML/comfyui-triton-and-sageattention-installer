@@ -47,6 +47,15 @@ See what's already installed before or after running the installer:
 python comfyui_triton_sageattention.py --show-installed
 ```
 
+### Preview Changes (Dry Run)
+
+Preview what would be installed or upgraded without making any changes:
+
+```bash
+# Preview install
+python comfyui_triton_sageattention.py --install --dryrun  #or --upgrade
+```
+
 ### Additional Installation Options
 
 ```bash
