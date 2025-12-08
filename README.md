@@ -39,7 +39,15 @@ python comfyui_triton_sageattention.py --install --with-custom-nodes
 ```
 By default `comfyui_triton_sageattention.py` installs Triton and SageAttention 2 (falls back to 1 if unavailable). Add `--with-custom-nodes` to also install VideoHelperSuite and DazzleNodes.
 
-### Installation Options
+### Check Current Installation
+
+See what's already installed before or after running the installer:
+
+```bash
+python comfyui_triton_sageattention.py --show-installed
+```
+
+### Additional Installation Options
 
 ```bash
 # Verbose mode for debugging

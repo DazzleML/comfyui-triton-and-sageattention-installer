@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 
 # Version information
-__version__ = "0.6.1"
+__version__ = "0.6.2"
 
 
 def parse_sage_version(version_str: str) -> Tuple[Optional[int], Optional[str]]:
@@ -1209,12 +1209,101 @@ class ComfyUIInstaller:
             Version string (e.g., "1.0.6", "2.2.0+cu128torch2.7.1.post3") or None.
         """
         try:
-            result = self._run_python_command(
+            result = self.handler.run_command([
+                str(self.handler.python_path), "-c",
                 "from importlib.metadata import version; print(version('sageattention'))"
-            )
-            return result.strip() if result else None
+            ], capture_output=True)
+            return result.stdout.strip() if result.stdout else None
         except Exception:
             return None
+
+    def _get_installed_triton_version(self) -> Optional[str]:
+        """Get currently installed triton/triton-windows version, or None if not installed.
+
+        Returns:
+            Version string (e.g., "3.5.1.post22") or None.
+        """
+        # Try triton-windows first (Windows), then triton (Linux/Mac)
+        for package in ["triton-windows", "triton"]:
+            try:
+                result = self.handler.run_command([
+                    str(self.handler.python_path), "-c",
+                    f"from importlib.metadata import version; print(version('{package}'))"
+                ], capture_output=True)
+                if result.stdout and result.stdout.strip():
+                    return result.stdout.strip()
+            except Exception:
+                continue
+        return None
+
+    def _format_cuda_version(self, cuda_code: str) -> str:
+        """Format CUDA version code to human-readable format.
+
+        Args:
+            cuda_code: Version like "128" or "126" or "cpu"
+
+        Returns:
+            Formatted version like "12.8" or "12.6" or "N/A (CPU)"
+        """
+        if not cuda_code or cuda_code == "cpu":
+            return "N/A (CPU)"
+        # Handle 3-digit codes like "128" -> "12.8"
+        if len(cuda_code) == 3:
+            return f"{cuda_code[0:2]}.{cuda_code[2]}"
+        # Handle 2-digit codes like "90" -> "9.0"
+        if len(cuda_code) == 2:
+            return f"{cuda_code[0]}.{cuda_code[1]}"
+        return cuda_code
+
+    def get_environment_info(self) -> Dict[str, Dict[str, str]]:
+        """Collect current environment information.
+
+        Returns:
+            Dict with component info, each containing 'version' and 'status'.
+        """
+        sa_version = self._get_installed_sageattention_version()
+        triton_version = self._get_installed_triton_version()
+        torch_version = self._get_torch_version()
+        cuda_code = self._get_cuda_version_from_torch()
+        python_version = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+
+        return {
+            "SageAttention": {
+                "version": sa_version or "-",
+                "status": "Installed" if sa_version else "Not installed"
+            },
+            "Triton": {
+                "version": triton_version or "-",
+                "status": "Installed" if triton_version else "Not installed"
+            },
+            "PyTorch": {
+                "version": torch_version or "-",
+                "status": "Installed" if torch_version else "Not installed"
+            },
+            "CUDA": {
+                "version": self._format_cuda_version(cuda_code),
+                "status": "Detected" if cuda_code and cuda_code != "cpu" else "CPU only"
+            },
+            "Python": {
+                "version": python_version,
+                "status": "Active"
+            }
+        }
+
+    def show_installed(self) -> None:
+        """Display current installation status as a formatted table."""
+        info = self.get_environment_info()
+
+        print("=" * 62)
+        print("Current Installation")
+        print("=" * 62)
+        print(f"| {'Component':<15} | {'Version':<28} | {'Status':<9} |")
+        print("|" + "-" * 17 + "|" + "-" * 30 + "|" + "-" * 11 + "|")
+        for component, data in info.items():
+            version = data["version"]
+            status = data["status"]
+            print(f"| {component:<15} | {version:<28} | {status:<9} |")
+        print("=" * 62)
 
     def _parse_sageattention_major_version(self, version_str: str) -> Optional[int]:
         """Extract major version (1 or 2) from sageattention version string.
@@ -1884,6 +1973,12 @@ Examples:
     )
 
     parser.add_argument(
+        "--show-installed",
+        action="store_true",
+        help="Display current installation status (SageAttention, Triton, PyTorch, CUDA, Python)"
+    )
+
+    parser.add_argument(
         "--version",
         action="version",
         version=f"%(prog)s {__version__}"
@@ -1895,7 +1990,7 @@ Examples:
     if args.install and args.upgrade:
         parser.error("--install and --upgrade are mutually exclusive. Use --upgrade to upgrade existing installation.")
 
-    if not (args.install or args.cleanup or args.run or args.upgrade):
+    if not (args.install or args.cleanup or args.run or args.upgrade or args.show_installed):
         parser.print_help()
         return 1
 
@@ -1910,6 +2005,11 @@ Examples:
         upgrade=args.upgrade,
         with_custom_nodes=args.with_custom_nodes
     )
+
+    # Handle --show-installed (standalone action, exit after displaying)
+    if args.show_installed:
+        installer.show_installed()
+        return 0
 
     success = True
 
@@ -1928,7 +2028,7 @@ Examples:
 
     if args.run:
         installer.run_comfyui()
-    
+
     return 0
 
 
