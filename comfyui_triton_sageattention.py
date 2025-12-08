@@ -1378,19 +1378,24 @@ class ComfyUIInstaller:
 
         return None
 
-    def check_compatibility(self) -> Dict[str, Any]:
+    def check_compatibility(self, torch_ver: Optional[str] = None,
+                            cuda_ver: Optional[str] = None) -> Dict[str, Any]:
         """Check if current environment is compatible with SA 2.x.
+
+        Args:
+            torch_ver: Pre-collected PyTorch version (avoids re-running subprocess)
+            cuda_ver: Pre-collected CUDA version code (avoids re-running subprocess)
 
         Returns:
             Dict with compatibility info.
         """
         try:
-            torch_ver = self._get_torch_version()
-            cuda_ver = self._get_cuda_version_from_torch()
+            # Use provided values or fetch them
+            if torch_ver is None:
+                torch_ver = self._get_torch_version()
+            if cuda_ver is None:
+                cuda_ver = self._get_cuda_version_from_torch()
             python_ver = f"{sys.version_info.major}{sys.version_info.minor}"
-
-            if not torch_ver or torch_ver == "2.7.0":  # Default fallback check
-                pass  # Continue with detected values
 
             match = self._find_matching_wheel(cuda_ver, torch_ver, python_ver,
                                               include_experimental=self.experimental)
@@ -1426,11 +1431,16 @@ class ComfyUIInstaller:
                 'message': f"Could not determine compatibility: {e}"
             }
 
-    def get_environment_info(self) -> Dict[str, Dict[str, str]]:
+    def get_environment_info(self) -> Tuple[Dict[str, Dict[str, str]], str, str]:
         """Collect current environment information.
 
+        Collects all data in one pass to minimize subprocess calls.
+
         Returns:
-            Dict with component info, each containing 'version' and 'status'.
+            Tuple of:
+            - Dict with component info, each containing 'version' and 'status'
+            - torch_version (raw, for use by check_compatibility)
+            - cuda_code (raw, for use by check_compatibility)
         """
         sa_version = self._get_installed_sageattention_version()
         triton_version = self._get_installed_triton_version()
@@ -1438,7 +1448,7 @@ class ComfyUIInstaller:
         cuda_code = self._get_cuda_version_from_torch()
         python_version = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
 
-        return {
+        info = {
             "SageAttention": {
                 "version": sa_version or "-",
                 "status": "Installed" if sa_version else "Not installed"
@@ -1460,11 +1470,22 @@ class ComfyUIInstaller:
                 "status": "Active"
             }
         }
+        return info, torch_version, cuda_code
 
     def show_installed(self) -> None:
-        """Display current installation status as a formatted table."""
-        info = self.get_environment_info()
+        """Display current installation status as a formatted table.
 
+        Collects all data first (which may generate INFO logs), then prints
+        the clean formatted output so it's easy to copy-paste for support.
+        """
+        # Collect all data first (this generates INFO logs from subprocess calls)
+        # Pass torch_ver and cuda_ver to check_compatibility to avoid re-fetching
+        info, torch_ver, cuda_ver = self.get_environment_info()
+        compat = self.check_compatibility(torch_ver=torch_ver, cuda_ver=cuda_ver)
+        script_name = Path(sys.argv[0]).name
+
+        # Now print clean output (all INFO logs are above this)
+        print()  # Blank line to separate from any INFO logs
         print("=" * 62)
         print("Current Installation")
         print("=" * 62)
@@ -1475,11 +1496,9 @@ class ComfyUIInstaller:
             status = data["status"]
             print(f"| {component:<15} | {version:<28} | {status:<9} |")
         print("=" * 62)
-        script_name = Path(sys.argv[0]).name
         print(f"{script_name} version: {__version__}")
 
-        # Check SA 2.x compatibility
-        compat = self.check_compatibility()
+        # Compatibility status
         print()
         if compat['compatible']:
             print(f"SA 2.x Compatibility: [OK] {compat['message']}")
@@ -1491,19 +1510,21 @@ class ComfyUIInstaller:
 
     def preview_changes(self) -> None:
         """Preview what install/upgrade would do without making changes."""
-        print("=" * 70)
-        print("DRY RUN - Preview of Changes (no changes will be made)")
-        print("=" * 70)
-
-        # Current state
-        info = self.get_environment_info()
-        compat = self.check_compatibility()
+        # Collect all data first (this generates INFO logs from subprocess calls)
+        info, torch_ver, cuda_ver = self.get_environment_info()
+        compat = self.check_compatibility(torch_ver=torch_ver, cuda_ver=cuda_ver)
 
         current_sa = info["SageAttention"]["version"]
         current_triton = info["Triton"]["version"]
         current_torch = info["PyTorch"]["version"]
         current_cuda = info["CUDA"]["version"]
         current_python = info["Python"]["version"]
+
+        # Now print clean output (all INFO logs are above this)
+        print()  # Blank line to separate from any INFO logs
+        print("=" * 70)
+        print("DRY RUN - Preview of Changes (no changes will be made)")
+        print("=" * 70)
 
         # Determine target versions
         if compat['compatible']:
