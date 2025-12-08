@@ -1236,6 +1236,42 @@ class ComfyUIInstaller:
                 continue
         return None
 
+    def _check_package_update_available(self, package: str) -> Tuple[bool, Optional[str]]:
+        """Check if a package has an update available using pip --dry-run.
+
+        Args:
+            package: Package name (e.g., "triton-windows")
+
+        Returns:
+            Tuple of (has_update, new_version or None)
+        """
+        try:
+            # pip install --dry-run --upgrade shows what would be installed
+            result = self.handler.run_command([
+                str(self.handler.python_path), "-m", "pip", "install",
+                "--dry-run", "--upgrade", package
+            ], capture_output=True)
+
+            output = result.stdout + result.stderr if result.stderr else result.stdout
+
+            # Look for "Would install" in output
+            # Example: "Would install triton-windows-3.5.2"
+            if "Would install" in output:
+                # Extract version from output
+                import re
+                match = re.search(rf'{re.escape(package)}-(\d+\.\d+[^\s,]*)', output, re.IGNORECASE)
+                if match:
+                    return True, match.group(1)
+                return True, None  # Update available but couldn't parse version
+
+            # "Requirement already satisfied" means no update
+            if "Requirement already satisfied" in output:
+                return False, None
+
+            return False, None
+        except Exception:
+            return False, None
+
     def _format_cuda_version(self, cuda_code: str) -> str:
         """Format CUDA version code to human-readable format.
 
@@ -1520,11 +1556,11 @@ class ComfyUIInstaller:
         current_cuda = info["CUDA"]["version"]
         current_python = info["Python"]["version"]
 
-        # Now print clean output (all INFO logs are above this)
-        print()  # Blank line to separate from any INFO logs
-        print("=" * 70)
-        print("DRY RUN - Preview of Changes (no changes will be made)")
-        print("=" * 70)
+        # Pre-check Triton update (generates INFO log, must be before formatted output)
+        triton_package = "triton-windows" if sys.platform == "win32" else "triton"
+        triton_has_update, triton_new_version = (False, None)
+        if current_triton != "-" and self.upgrade:
+            triton_has_update, triton_new_version = self._check_package_update_available(triton_package)
 
         # Determine target versions
         if compat['compatible']:
@@ -1536,8 +1572,11 @@ class ComfyUIInstaller:
             target_sa_type = "SA 1.x (~2.1x speedup)"
             wheel_url = "PyPI (pip install sageattention==1.0.6)"
 
-        # Triton target (triton-windows latest)
-        target_triton = "latest (triton-windows)"
+        # Now print clean output (all INFO logs are above this)
+        print()  # Blank line to separate from any INFO logs
+        print("=" * 70)
+        print("DRY RUN - Preview of Changes (no changes will be made)")
+        print("=" * 70)
 
         print()
         print("Current Environment:")
@@ -1561,24 +1600,36 @@ class ComfyUIInstaller:
         else:
             changes.append(("PyTorch", "[KEEP]", f"{current_torch} (already installed)"))
 
-        # Triton
+        # Triton - use pre-fetched update check results
         if current_triton == "-":
-            changes.append(("Triton", "[INSTALL]", "triton-windows (latest)"))
-        elif self.upgrade:
-            changes.append(("Triton", "[UPGRADE]", "triton-windows (latest)"))
+            changes.append(("Triton", "[INSTALL]", f"{triton_package} (latest)"))
         else:
-            changes.append(("Triton", "[KEEP]", f"{current_triton} (already installed)"))
+            if self.upgrade:
+                # Use pre-fetched results from pip --dry-run check
+                if triton_has_update:
+                    if triton_new_version:
+                        changes.append(("Triton", "[UPGRADE]", f"{current_triton} → {triton_new_version}"))
+                    else:
+                        changes.append(("Triton", "[UPGRADE]", f"{current_triton} → (newer version available)"))
+                else:
+                    changes.append(("Triton", "[KEEP]", f"{current_triton} (already latest)"))
+            else:
+                changes.append(("Triton", "[KEEP]", f"{current_triton} (already installed)"))
 
         # SageAttention
         if current_sa == "-":
             changes.append(("SageAttention", "[INSTALL]", f"{target_sa} - {target_sa_type}"))
         elif self.upgrade:
-            current_major = self._parse_sageattention_major_version(current_sa)
-            target_major = 2 if compat['compatible'] else 1
-            if current_major == target_major:
-                changes.append(("SageAttention", "[UPGRADE]", f"{target_sa} - {target_sa_type}"))
+            # Check if installed version matches target
+            if self._sageattention_version_matches(current_sa, target_sa):
+                changes.append(("SageAttention", "[KEEP]", f"{current_sa} (already at target version)"))
             else:
-                changes.append(("SageAttention", "[UPGRADE]", f"{target_sa} - {target_sa_type} (version change!)"))
+                current_major = self._parse_sageattention_major_version(current_sa)
+                target_major = 2 if compat['compatible'] else 1
+                if current_major == target_major:
+                    changes.append(("SageAttention", "[UPGRADE]", f"{target_sa} - {target_sa_type}"))
+                else:
+                    changes.append(("SageAttention", "[UPGRADE]", f"{target_sa} - {target_sa_type} (version change!)"))
         else:
             changes.append(("SageAttention", "[KEEP]", f"{current_sa} (already installed)"))
 
@@ -1589,6 +1640,9 @@ class ComfyUIInstaller:
 
         for component, action, detail in changes:
             print(f"  {component:<15} {action:<10} {detail}")
+
+        # Check if there are any actual changes to make
+        has_changes = any(action in ("[INSTALL]", "[UPGRADE]") for _, action, _ in changes)
 
         print()
         print("-" * 70)
@@ -1605,7 +1659,10 @@ class ComfyUIInstaller:
 
         print()
         print("=" * 70)
-        print("To execute these changes, run without --dryrun")
+        if has_changes:
+            print("To execute these changes, run without --dryrun")
+        else:
+            print("Nothing to do - all components are already up to date")
         print("=" * 70)
 
     def _parse_sageattention_major_version(self, version_str: str) -> Optional[int]:
@@ -1624,6 +1681,48 @@ class ComfyUIInstaller:
         if match:
             return int(match.group(1))
         return None
+
+    def _sageattention_version_matches(self, installed: str, target: str) -> bool:
+        """Check if installed SA version matches the target wheel version.
+
+        Args:
+            installed: Installed version like "2.2.0+cu128torch2.7.1.post3" or "1.0.6"
+            target: Target wheel version like "2.2.0.post3" or "1.0.6"
+
+        Returns:
+            True if versions match (considering post suffix and local version).
+        """
+        if not installed or not target or installed == "-":
+            return False
+
+        # Normalize target: "2.2.0.post3" -> base="2.2.0", post="post3"
+        target_match = re.match(r'^(\d+\.\d+\.\d+)(?:\.?(post\d+))?$', target)
+        if not target_match:
+            return installed == target  # Fallback to exact match
+
+        target_base = target_match.group(1)  # "2.2.0"
+        target_post = target_match.group(2)  # "post3" or None
+
+        # Installed version formats:
+        # - "2.2.0+cu128torch2.7.1.post3" (SA 2.x with local version)
+        # - "1.0.6" (SA 1.x from PyPI)
+        # Extract base version and any post suffix from installed
+        installed_match = re.match(r'^(\d+\.\d+\.\d+)(?:\+.*?(post\d+))?$', installed)
+        if not installed_match:
+            # Try without + suffix (like "1.0.6")
+            installed_match = re.match(r'^(\d+\.\d+\.\d+)(?:\.?(post\d+))?$', installed)
+            if not installed_match:
+                return False
+
+        installed_base = installed_match.group(1)  # "2.2.0"
+        installed_post = installed_match.group(2)  # "post3" or None
+
+        # Compare base versions and post suffixes
+        if installed_base != target_base:
+            return False
+
+        # Both must have same post suffix (or both None)
+        return installed_post == target_post
 
     def _build_wheel_url(self, sage_ver: str, cuda: str, torch_pattern: str,
                          torch_ver: str, py_spec: Optional[str], tag: str, is_abi3: bool,

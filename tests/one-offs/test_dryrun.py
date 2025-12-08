@@ -102,8 +102,9 @@ def test_1_dryrun_with_install():
     if "Wheel Details" not in result.stdout:
         return False, "Missing 'Wheel Details' section"
 
-    if "run without --dryrun" not in result.stdout:
-        return False, "Missing instruction to run without --dryrun"
+    # Should have either "run without --dryrun" (if changes needed) or "Nothing to do" (if up to date)
+    if "run without --dryrun" not in result.stdout and "Nothing to do" not in result.stdout:
+        return False, "Missing final status message (expected 'run without --dryrun' or 'Nothing to do')"
 
     return True, "--dryrun --install produces correct preview output"
 
