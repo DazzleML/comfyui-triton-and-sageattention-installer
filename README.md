@@ -62,7 +62,12 @@ python comfyui_triton_sageattention.py --install --sage-version 1  # or 2
 
 # Advanced: install specific version
 python comfyui_triton_sageattention.py --install --sage-version 2.1.1
+
+# Opt-in to experimental/prerelease versions (use with caution)
+python comfyui_triton_sageattention.py --install --experimental
 ```
+
+For a full list of supported PyTorch/CUDA/Python combinations, see [docs/supported_wheels.md](docs/supported_wheels.md).
 
 ## Usage
 

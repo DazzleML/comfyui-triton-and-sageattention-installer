@@ -876,10 +876,11 @@ class ComfyUIInstaller:
         "torch", "torchvision", "torchaudio"
     ]
     
-    def __init__(self, base_path: Optional[Path] = None, verbose: bool = False, interactive: bool = True, force: bool = False, sage_version: str = "auto"):
+    def __init__(self, base_path: Optional[Path] = None, verbose: bool = False, interactive: bool = True, force: bool = False, sage_version: str = "auto", experimental: bool = False):
         self.base_path = base_path or Path.cwd()
         self.interactive = interactive
         self.force = force
+        self.experimental = experimental
         # Parse sage_version into (major, exact) tuple
         self.sage_version_raw = sage_version
         self.sage_version_major, self.sage_version_exact = parse_sage_version(sage_version)
@@ -1179,6 +1180,81 @@ class ComfyUIInstaller:
         except Exception:
             return "Could not detect versions"
 
+    def _build_wheel_url(self, sage_ver: str, cuda: str, torch_pattern: str,
+                         torch_ver: str, py_spec: Optional[str], tag: str, is_abi3: bool) -> str:
+        """Build the wheel URL for a SageAttention wheel.
+
+        Args:
+            sage_ver: SageAttention version (e.g., "2.2.0.post3")
+            cuda: CUDA version code (e.g., "128" for 12.8)
+            torch_pattern: PyTorch pattern from config (e.g., "2.7" or "2.7.0")
+            torch_ver: Actual PyTorch version installed (e.g., "2.7.0")
+            py_spec: Python version spec (None for ABI3, or "312" for exact)
+            tag: GitHub release tag (e.g., "v2.2.0-windows.post3")
+            is_abi3: Whether this is an ABI3 wheel
+
+        Returns:
+            Full URL to the wheel file.
+        """
+        base_url = f"https://github.com/woct0rdho/SageAttention/releases/download/{tag}"
+
+        if is_abi3:
+            # ABI3 wheels have format: sageattention-2.2.0+cu128torch2.7.1.post3-cp39-abi3-win_amd64.whl
+            # Note: sage version in filename is base (2.2.0), .postX is appended to torch version
+            sage_base = sage_ver.split(".post")[0] if ".post" in sage_ver else sage_ver
+            torch_filename = self._get_abi3_torch_filename(sage_ver, cuda, torch_pattern)
+            wheel_name = f"sageattention-{sage_base}+cu{cuda}torch{torch_filename}-cp39-abi3-win_amd64.whl"
+        else:
+            # Regular wheels: sageattention-2.1.1+cu128torch2.7.0-cp312-cp312-win_amd64.whl
+            wheel_name = f"sageattention-{sage_ver}+cu{cuda}torch{torch_pattern}-cp{py_spec}-cp{py_spec}-win_amd64.whl"
+
+        return f"{base_url}/{wheel_name}"
+
+    def _get_abi3_torch_filename(self, sage_ver: str, cuda: str, torch_pattern: str) -> str:
+        """Get the torch version string used in ABI3 wheel filenames.
+
+        ABI3 wheel filenames include the full torch version plus the .postX suffix.
+        This maps our pattern to the actual filename used by woct0rdho.
+
+        Args:
+            sage_ver: SageAttention version (e.g., "2.2.0.post3")
+            cuda: CUDA version code
+            torch_pattern: PyTorch major.minor pattern (e.g., "2.7")
+
+        Returns:
+            Torch version string for filename (e.g., "2.7.1.post3")
+        """
+        # Extract post suffix from sage_ver (e.g., "2.2.0.post3" -> ".post3")
+        post_suffix = ""
+        if ".post" in sage_ver:
+            post_suffix = "." + sage_ver.split(".post")[1]
+            post_suffix = f".post{post_suffix}" if not post_suffix.startswith(".post") else post_suffix
+            # Fix: extract just the postX part
+            post_idx = sage_ver.find(".post")
+            post_suffix = sage_ver[post_idx:]  # e.g., ".post3"
+
+        # Map torch patterns to actual versions used in filenames
+        # Based on actual wheel filenames from GitHub releases
+        torch_version_map = {
+            # 2.2.0.post3 wheels
+            ("2.2.0.post3", "130", "2.9"): "2.9.0",
+            ("2.2.0.post3", "128", "2.9"): "2.9.0",
+            ("2.2.0.post3", "128", "2.8"): "2.8.0",
+            ("2.2.0.post3", "128", "2.7"): "2.7.1",
+            ("2.2.0.post3", "126", "2.6"): "2.6.0",
+            ("2.2.0.post3", "124", "2.5"): "2.5.1",
+            # 2.2.0.post4 wheels (use "2.9.0andhigher" format)
+            ("2.2.0.post4", "130", "2.9"): "2.9.0andhigher",
+            ("2.2.0.post4", "128", "2.9"): "2.9.0andhigher",
+        }
+
+        key = (sage_ver, cuda, torch_pattern)
+        if key in torch_version_map:
+            return torch_version_map[key] + post_suffix
+        else:
+            # Fallback: use pattern with .0 suffix
+            return torch_pattern + ".0" + post_suffix
+
     def _try_install_sageattention_v2(self, exact_version: Optional[str] = None) -> bool:
         """Attempt to install SageAttention 2.x from pre-built wheel.
 
@@ -1205,23 +1281,85 @@ class ComfyUIInstaller:
                 print("  Checking for compatible pre-built wheel...")
 
             # Known working wheel combinations from woct0rdho
+            # Format: (sage_ver, cuda, torch_pattern, py_spec, tag, is_abi3, is_experimental)
+            # - torch_pattern: "2.7" matches 2.7.x, "2.7.1" matches exactly
+            # - py_spec: None for ABI3 (Python 3.9+), or exact like "312"
+            # - is_abi3: True for cp39-abi3 wheels that work with Python 3.9+
+            # - is_experimental: True for prerelease versions (require --experimental)
             wheel_configs = [
-                ("2.1.1", "128", "270", "312"),  # CUDA 12.8, PyTorch 2.7.0, Python 3.12
-                ("2.1.1", "126", "260", "312"),  # CUDA 12.6, PyTorch 2.6.0, Python 3.12
-                ("2.0.1", "126", "250", "312"),  # CUDA 12.6, PyTorch 2.5.0, Python 3.12
-                ("2.0.1", "121", "240", "312"),  # CUDA 12.1, PyTorch 2.4.0, Python 3.12
-                ("2.0.1", "118", "240", "311"),  # CUDA 11.8, PyTorch 2.4.0, Python 3.11
+                # === SA 2.2.0.post3 (ABI3 - Python 3.9+) - STABLE, PRIMARY ===
+                # These use cp39-abi3 tag, work with any Python 3.9+
+                ("2.2.0.post3", "130", "2.9", None, "v2.2.0-windows.post3", True, False),   # CUDA 13.0, PyTorch 2.9.x
+                ("2.2.0.post3", "128", "2.9", None, "v2.2.0-windows.post3", True, False),   # CUDA 12.8, PyTorch 2.9.x
+                ("2.2.0.post3", "128", "2.8", None, "v2.2.0-windows.post3", True, False),   # CUDA 12.8, PyTorch 2.8.x
+                ("2.2.0.post3", "128", "2.7", None, "v2.2.0-windows.post3", True, False),   # CUDA 12.8, PyTorch 2.7.x
+                ("2.2.0.post3", "126", "2.6", None, "v2.2.0-windows.post3", True, False),   # CUDA 12.6, PyTorch 2.6.x
+                ("2.2.0.post3", "124", "2.5", None, "v2.2.0-windows.post3", True, False),   # CUDA 12.4, PyTorch 2.5.x
+
+                # === SA 2.2.0.post4 (ABI3) - EXPERIMENTAL (torch.compile support) ===
+                ("2.2.0.post4", "130", "2.9", None, "v2.2.0-windows.post4", True, True),    # CUDA 13.0, PyTorch 2.9+
+                ("2.2.0.post4", "128", "2.9", None, "v2.2.0-windows.post4", True, True),    # CUDA 12.8, PyTorch 2.9+
+
+                # === SA 2.1.1 (per-Python) - for --sage-version 2.1.1 requests ===
+                # These use cpXXX-cpXXX tag, need exact Python match
+                ("2.1.1", "128", "2.8.0", "313", "v2.1.1-windows", False, False),
+                ("2.1.1", "128", "2.8.0", "312", "v2.1.1-windows", False, False),
+                ("2.1.1", "128", "2.8.0", "311", "v2.1.1-windows", False, False),
+                ("2.1.1", "128", "2.8.0", "310", "v2.1.1-windows", False, False),
+                ("2.1.1", "128", "2.7.1", "312", "v2.1.1-windows", False, False),
+                ("2.1.1", "128", "2.7.0", "312", "v2.1.1-windows", False, False),
+                ("2.1.1", "128", "2.7.0", "311", "v2.1.1-windows", False, False),
+                ("2.1.1", "126", "2.6.0", "312", "v2.1.1-windows", False, False),
+                ("2.1.1", "126", "2.6.0", "311", "v2.1.1-windows", False, False),
+                ("2.1.1", "124", "2.5.1", "312", "v2.1.1-windows", False, False),
+                ("2.1.1", "124", "2.5.1", "311", "v2.1.1-windows", False, False),
+
+                # === Legacy 2.0.1 (per-Python) - backward compat ===
+                ("2.0.1", "126", "2.5.0", "312", "v2.0.1-windows", False, False),
+                ("2.0.1", "121", "2.4.0", "312", "v2.0.1-windows", False, False),
+                ("2.0.1", "118", "2.4.0", "311", "v2.0.1-windows", False, False),
             ]
 
-            for sage_ver, cuda_whl, torch_whl, py_whl in wheel_configs:
-                # Skip if exact version requested and this isn't it
-                if exact_version and sage_ver != exact_version:
+            # Extract user's torch major.minor for pattern matching
+            torch_parts = torch_ver.split(".")
+            torch_major_minor = f"{torch_parts[0]}.{torch_parts[1]}" if len(torch_parts) >= 2 else torch_ver
+            py_int = int(python_ver)  # e.g., "312" -> 312
+
+            for sage_ver, cuda_whl, torch_pattern, py_spec, tag, is_abi3, is_experimental in wheel_configs:
+                # Skip experimental unless --experimental flag is set
+                if is_experimental and not self.experimental:
                     continue
 
-                if py_whl != python_ver:
-                    continue  # Skip incompatible Python versions
+                # Skip if exact version requested and this isn't it
+                if exact_version and not sage_ver.startswith(exact_version):
+                    continue
 
-                wheel_url = f"https://github.com/woct0rdho/SageAttention/releases/download/v{sage_ver}-windows/sageattention-{sage_ver}+cu{cuda_whl}torch{torch_whl[0]}.{torch_whl[1]}.{torch_whl[2]}-cp{py_whl}-cp{py_whl}-win_amd64.whl"
+                # CUDA must match exactly
+                if cuda_whl != cuda_ver:
+                    continue
+
+                # PyTorch matching: pattern "2.7" matches "2.7.0", "2.7.1", etc.
+                if "." in torch_pattern and torch_pattern.count(".") == 2:
+                    # Exact version like "2.7.0" - must match exactly
+                    if torch_ver != torch_pattern:
+                        continue
+                else:
+                    # Pattern like "2.7" - match major.minor
+                    if torch_major_minor != torch_pattern:
+                        continue
+
+                # Python matching
+                if is_abi3:
+                    # ABI3 wheels work with Python 3.9+
+                    if py_int < 39:
+                        continue
+                else:
+                    # Exact Python version required
+                    if py_spec != python_ver:
+                        continue
+
+                # Build the wheel URL based on wheel type
+                wheel_url = self._build_wheel_url(sage_ver, cuda_whl, torch_pattern, torch_ver, py_spec, tag, is_abi3)
 
                 try:
                     self.logger.info(f"Trying pre-built wheel: {wheel_url}")
@@ -1501,7 +1639,26 @@ class ComfyUIInstaller:
             else:
                 print("Non-interactive force mode: proceeding with installation...")
             print()
-        
+
+        if self.experimental:
+            print("EXPERIMENTAL MODE ENABLED")
+            print("WARNING: You have enabled experimental/prerelease versions.")
+            print("These versions may:")
+            print("   - Cause black or noisy outputs")
+            print("   - Have compatibility issues with some workflows")
+            print("   - Be less stable than release versions")
+            print()
+            print("Use --sage-version auto (without --experimental) to revert to stable.")
+            print()
+            if self.interactive:
+                response = input("Continue with experimental mode? (y/N): ")
+                if response.lower() != 'y':
+                    print("Installation cancelled.")
+                    return False
+            else:
+                print("Non-interactive experimental mode: proceeding...")
+            print()
+
         sage_attention_failed = False
         
         try:
@@ -1637,6 +1794,13 @@ Examples:
     )
 
     parser.add_argument(
+        "--experimental",
+        action="store_true",
+        help="Allow installation of experimental/prerelease SageAttention versions. "
+             "Use with caution - these versions may cause issues."
+    )
+
+    parser.add_argument(
         "--version",
         action="version",
         version=f"%(prog)s {__version__}"
@@ -1654,7 +1818,8 @@ Examples:
         verbose=args.verbose,
         interactive=not args.non_interactive,
         force=args.force,
-        sage_version=args.sage_version
+        sage_version=args.sage_version,
+        experimental=args.experimental
     )
     
     success = True
