@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 
 # Version information
-__version__ = "0.5.0"
+__version__ = "0.6.0"
 
 
 def parse_sage_version(version_str: str) -> Tuple[Optional[int], Optional[str]]:

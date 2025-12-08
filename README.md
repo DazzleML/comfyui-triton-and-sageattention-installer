@@ -54,17 +54,17 @@ python comfyui_triton_sageattention.py --cleanup
 
 ### SageAttention Version Control
 
-Control which SageAttention version gets installed:
+Control which SageAttention version gets installed (default: SA 2.2.0.post3):
 
 ```bash
-# Explicitly install SageAttention 1 (~2.1x speedup, more compatible) or 2 (~3x speedup) & fails if unavailable
+# Explicitly install SageAttention 1 (~2.1x speedup, more compatible) or 2 (~3x speedup)
 python comfyui_triton_sageattention.py --install --sage-version 1  # or 2
-
-# Advanced: install specific version
-python comfyui_triton_sageattention.py --install --sage-version 2.1.1
 
 # Opt-in to experimental/prerelease versions (use with caution)
 python comfyui_triton_sageattention.py --install --experimental
+
+# Upgrade existing installation to latest version
+python comfyui_triton_sageattention.py --upgrade
 ```
 
 For a full list of supported PyTorch/CUDA/Python combinations, see [docs/supported_wheels.md](docs/supported_wheels.md).
