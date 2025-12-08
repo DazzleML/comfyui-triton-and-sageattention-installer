@@ -35,9 +35,9 @@ Installing SageAttention on Windows has been notoriously difficult due to compil
 ### Quick Start
 
 ```bash
-python comfyui_triton_sageattention.py --install
+python comfyui_triton_sageattention.py --install --with-custom-nodes
 ```
-By default `comfyui_triton_sageattention.py` tries to install SageAttention 2, and falls back to 1 if unavailable.
+By default `comfyui_triton_sageattention.py` installs Triton and SageAttention 2 (falls back to 1 if unavailable). Add `--with-custom-nodes` to also install VideoHelperSuite and DazzleNodes.
 
 ### Installation Options
 
@@ -87,10 +87,11 @@ python ComfyUI\main.py --use-sage-attention
 2. **Triton-Windows** - OpenAI's Triton for Windows
 3. **SageAttention** - Efficient attention mechanism
 4. **Python Development Files** - Required headers and libs
-5. **Additional Custom Nodes**:
-   - SageAttention repository
-   - flow2-wan-video
-   - ComfyUI-VideoHelperSuite
+
+### With `--with-custom-nodes`
+
+5. **[ComfyUI-VideoHelperSuite](https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite)** - Video encoding/decoding utilities
+6. **[DazzleNodes](https://github.com/DazzleNodes/DazzleNodes)** - DazzleML node collection
 
 ## Troubleshooting
 

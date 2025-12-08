@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 
 # Version information
-__version__ = "0.6.0"
+__version__ = "0.6.1"
 
 
 def parse_sage_version(version_str: str) -> Tuple[Optional[int], Optional[str]]:
@@ -864,8 +864,28 @@ class ComfyUIInstaller:
     
     REPOSITORIES = {
         "sageattention": "https://github.com/thu-ml/SageAttention",
-        "flow2_wan_video": "https://github.com/Flow-Two/flow2-wan-video.git",
-        "videohelper_suite": "https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite.git"
+    }
+
+    # Node preset configurations for --with-custom-nodes
+    # Future: Add more presets like "video", "wan", "flux", etc.
+    NODE_PRESETS = {
+        "default": [
+            {
+                "name": "ComfyUI-VideoHelperSuite",
+                "url": "https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite.git",
+                "description": "Video encoding/decoding utilities",
+            },
+            {
+                "name": "DazzleNodes",
+                "url": "https://github.com/DazzleNodes/DazzleNodes.git",
+                "description": "DazzleML node collection",
+            },
+        ],
+        # "video": [
+        #     # For users who need flow2-wan-video (can conflict with some workflows)
+        #     {"name": "flow2-wan-video", "url": "https://github.com/Flow-Two/flow2-wan-video.git"},
+        #     {"name": "ComfyUI-VideoHelperSuite", "url": "https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite.git"},
+        # ],
     }
     
     INCLUDE_LIBS_URL = "https://github.com/woct0rdho/triton-windows/releases/download/v3.0.0-windows.post1/python_3.12.7_include_libs.zip"
@@ -876,12 +896,13 @@ class ComfyUIInstaller:
         "torch", "torchvision", "torchaudio"
     ]
     
-    def __init__(self, base_path: Optional[Path] = None, verbose: bool = False, interactive: bool = True, force: bool = False, sage_version: str = "auto", experimental: bool = False, upgrade: bool = False):
+    def __init__(self, base_path: Optional[Path] = None, verbose: bool = False, interactive: bool = True, force: bool = False, sage_version: str = "auto", experimental: bool = False, upgrade: bool = False, with_custom_nodes: bool = False):
         self.base_path = base_path or Path.cwd()
         self.interactive = interactive
         self.force = force
         self.experimental = experimental
         self.upgrade = upgrade
+        self.with_custom_nodes = with_custom_nodes
         # Parse sage_version into (major, exact) tuple
         self.sage_version_raw = sage_version
         self.sage_version_major, self.sage_version_exact = parse_sage_version(sage_version)
@@ -932,8 +953,8 @@ class ComfyUIInstaller:
         # Remove directories (matches batch script) - but preserve user's venv
         directories_to_remove = [
             "SageAttention",
-            "ComfyUI/custom_nodes/flow2-wan-video",
-            "ComfyUI/custom_nodes/ComfyUI-VideoHelperSuite"
+            # Custom nodes are user-managed (opt-in with --with-custom-nodes)
+            # Users can manually remove them if needed
         ]
         
         # Only remove Python dev directories on Windows
@@ -1533,32 +1554,30 @@ class ComfyUIInstaller:
             # Don't re-raise here, continue with other installations
 
         # ─────────────────────────────────────────────────────────────
-        # Setup ComfyUI custom nodes directory
+        # Setup ComfyUI custom nodes (opt-in with --with-custom-nodes)
         # ─────────────────────────────────────────────────────────────
-        comfyui_nodes = self.base_path / "ComfyUI" / "custom_nodes"
-        comfyui_nodes.mkdir(parents=True, exist_ok=True)
-        
-        # Clone flow2-wan-video
-        flow2_dir = comfyui_nodes / "flow2-wan-video"
-        if self._update_or_clone_repo(flow2_dir, self.REPOSITORIES["flow2_wan_video"], "flow2-wan-video"):
-            # Install flow2-wan-video requirements
-            requirements_file = flow2_dir / "requirements.txt"
-            if requirements_file.exists():
-                try:
-                    self.handler.pip_install(["-r", str(requirements_file)])
-                except Exception as e:
-                    self.logger.warning(f"Failed to install flow2-wan-video requirements: {e}")
-        
-        # Clone VideoHelperSuite
-        video_dir = comfyui_nodes / "ComfyUI-VideoHelperSuite"
-        if self._update_or_clone_repo(video_dir, self.REPOSITORIES["videohelper_suite"], "ComfyUI-VideoHelperSuite"):
-            # Install VideoHelperSuite requirements
-            requirements_file = video_dir / "requirements.txt"
-            if requirements_file.exists():
-                try:
-                    self.handler.pip_install(["-r", str(requirements_file)])
-                except Exception as e:
-                    self.logger.warning(f"Failed to install ComfyUI-VideoHelperSuite requirements: {e}")
+        if self.with_custom_nodes:
+            print()
+            print("=" * 60)
+            print("Installing Custom Nodes")
+            print("=" * 60)
+
+            comfyui_nodes = self.base_path / "ComfyUI" / "custom_nodes"
+            comfyui_nodes.mkdir(parents=True, exist_ok=True)
+
+            for node_config in self.NODE_PRESETS["default"]:
+                node_name = node_config["name"]
+                node_url = node_config["url"]
+                node_dir = comfyui_nodes / node_name
+
+                if self._update_or_clone_repo(node_dir, node_url, node_name):
+                    # Install requirements if present
+                    requirements_file = node_dir / "requirements.txt"
+                    if requirements_file.exists():
+                        try:
+                            self.handler.pip_install(["-r", str(requirements_file)])
+                        except Exception as e:
+                            self.logger.warning(f"Failed to install {node_name} requirements: {e}")
         
         # If SageAttention failed, raise at the end so we still install other components
         if sage_failed:
@@ -1858,6 +1877,13 @@ Examples:
     )
 
     parser.add_argument(
+        "--with-custom-nodes",
+        action="store_true",
+        help="Install recommended custom nodes (VideoHelperSuite, DazzleNodes). "
+             "Omit this flag for minimal Triton/SageAttention-only installation."
+    )
+
+    parser.add_argument(
         "--version",
         action="version",
         version=f"%(prog)s {__version__}"
@@ -1881,7 +1907,8 @@ Examples:
         force=args.force,
         sage_version=args.sage_version,
         experimental=args.experimental,
-        upgrade=args.upgrade
+        upgrade=args.upgrade,
+        with_custom_nodes=args.with_custom_nodes
     )
 
     success = True
