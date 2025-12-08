@@ -876,11 +876,12 @@ class ComfyUIInstaller:
         "torch", "torchvision", "torchaudio"
     ]
     
-    def __init__(self, base_path: Optional[Path] = None, verbose: bool = False, interactive: bool = True, force: bool = False, sage_version: str = "auto", experimental: bool = False):
+    def __init__(self, base_path: Optional[Path] = None, verbose: bool = False, interactive: bool = True, force: bool = False, sage_version: str = "auto", experimental: bool = False, upgrade: bool = False):
         self.base_path = base_path or Path.cwd()
         self.interactive = interactive
         self.force = force
         self.experimental = experimental
+        self.upgrade = upgrade
         # Parse sage_version into (major, exact) tuple
         self.sage_version_raw = sage_version
         self.sage_version_major, self.sage_version_exact = parse_sage_version(sage_version)
@@ -1180,6 +1181,37 @@ class ComfyUIInstaller:
         except Exception:
             return "Could not detect versions"
 
+    def _get_installed_sageattention_version(self) -> Optional[str]:
+        """Get currently installed sageattention version, or None if not installed.
+
+        Returns:
+            Version string (e.g., "1.0.6", "2.2.0+cu128torch2.7.1.post3") or None.
+        """
+        try:
+            result = self._run_python_command(
+                "from importlib.metadata import version; print(version('sageattention'))"
+            )
+            return result.strip() if result else None
+        except Exception:
+            return None
+
+    def _parse_sageattention_major_version(self, version_str: str) -> Optional[int]:
+        """Extract major version (1 or 2) from sageattention version string.
+
+        Args:
+            version_str: Version like "1.0.6", "2.2.0+cu128torch2.7.1.post3"
+
+        Returns:
+            1, 2, or None if cannot parse.
+        """
+        if not version_str:
+            return None
+        # Version starts with major.minor.patch, possibly with +suffix
+        match = re.match(r'^(\d+)\.', version_str)
+        if match:
+            return int(match.group(1))
+        return None
+
     def _build_wheel_url(self, sage_ver: str, cuda: str, torch_pattern: str,
                          torch_ver: str, py_spec: Optional[str], tag: str, is_abi3: bool) -> str:
         """Build the wheel URL for a SageAttention wheel.
@@ -1446,9 +1478,26 @@ class ComfyUIInstaller:
         # ─────────────────────────────────────────────────────────────
         print()
         print("=" * 60)
-        print("Installing SageAttention")
+        if self.upgrade:
+            print("Upgrading SageAttention")
+        else:
+            print("Installing SageAttention")
         print("=" * 60)
         print(f"  Requested: --sage-version {self.sage_version_raw}")
+
+        # Handle upgrade mode: detect current version and remove before reinstall
+        if self.upgrade:
+            current_version = self._get_installed_sageattention_version()
+            if current_version:
+                current_major = self._parse_sageattention_major_version(current_version)
+                print(f"  Current version: {current_version} (SA{current_major})")
+                print("  Removing existing installation...")
+                try:
+                    self.handler.pip_uninstall(["sageattention"])
+                except Exception as e:
+                    self.logger.debug(f"Could not uninstall sageattention: {e}")
+            else:
+                print("  No existing SageAttention found, proceeding with install...")
 
         # Determine install strategy based on parsed version
         major = self.sage_version_major      # None, 1, or 2
@@ -1801,17 +1850,29 @@ Examples:
     )
 
     parser.add_argument(
+        "--upgrade",
+        action="store_true",
+        help="Upgrade existing SageAttention installation to latest compatible version. "
+             "Removes current installation before reinstalling. "
+             "Use with --sage-version for explicit target, or --experimental for prerelease versions."
+    )
+
+    parser.add_argument(
         "--version",
         action="version",
         version=f"%(prog)s {__version__}"
     )
-    
+
     args = parser.parse_args()
-    
-    if not (args.install or args.cleanup or args.run):
+
+    # Check for mutually exclusive options
+    if args.install and args.upgrade:
+        parser.error("--install and --upgrade are mutually exclusive. Use --upgrade to upgrade existing installation.")
+
+    if not (args.install or args.cleanup or args.run or args.upgrade):
         parser.print_help()
         return 1
-    
+
     # Create installer instance
     installer = ComfyUIInstaller(
         base_path=args.base_path,
@@ -1819,19 +1880,25 @@ Examples:
         interactive=not args.non_interactive,
         force=args.force,
         sage_version=args.sage_version,
-        experimental=args.experimental
+        experimental=args.experimental,
+        upgrade=args.upgrade
     )
-    
+
     success = True
-    
+
     if args.cleanup:
         installer.cleanup_installation()
-    
+
     if args.install:
         success = installer.install()
         if not success:
             return 1
-    
+
+    if args.upgrade:
+        success = installer.install()  # install() handles upgrade logic internally
+        if not success:
+            return 1
+
     if args.run:
         installer.run_comfyui()
     
