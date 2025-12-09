@@ -68,3 +68,21 @@ If your configuration isn't listed, please [open an issue](https://github.com/Da
 - Python version (`python --version`)
 
 Wheels are sourced from [woct0rdho's SageAttention releases](https://github.com/woct0rdho/SageAttention/releases).
+
+---
+
+## Triton/PyTorch Compatibility
+
+The installer automatically selects a compatible Triton version based on your PyTorch version. This ensures `torch.compile` works correctly.
+
+| PyTorch | Triton Version | Notes |
+|---------|----------------|-------|
+| >= 2.9 | 3.5.x | |
+| 2.8.x | 3.4.x | |
+| 2.7.x | 3.3.x | Current stable PyTorch |
+| 2.6.x | 3.2.x | |
+| < 2.6 | < 3.2 | Legacy |
+
+If you see a Triton/PyTorch compatibility warning in `--show-installed`, run the suggested fix command.
+
+Reference: [triton-windows compatibility](https://github.com/woct0rdho/triton-windows/issues/158)

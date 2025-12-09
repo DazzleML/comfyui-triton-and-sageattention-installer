@@ -149,15 +149,18 @@ def test_4_dryrun_no_modifications():
         return False, f"Non-zero return code: {result.returncode}"
 
     # Check that no actual installation commands were run
+    # Note: "pip install" can appear in help messages like "Fix: pip install ..."
+    # We look for indicators of actual installation activity
     bad_indicators = [
-        "pip install",
-        "Successfully installed",
-        "git clone",
-        "Cloning into",
-        "Installing collected packages",
-        "Step 1:",  # Installation step indicators
+        "Successfully installed",  # Actual pip installation success
+        "Installing collected packages",  # pip actually installing
+        "git clone",  # Actual cloning
+        "Cloning into",  # Git clone in progress
+        "Step 1:",  # Installation step indicators (actual steps)
         "Step 2:",
         "Step 3:",
+        "Downloading",  # pip downloading packages
+        "Collecting",  # pip collecting packages
     ]
 
     found_bad = []
