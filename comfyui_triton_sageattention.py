@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 # Version information
-__version__ = "0.6.5"
+__version__ = "0.6.6"
 
 
 def parse_sage_version(version_str: str) -> Tuple[Optional[int], Optional[str]]:
@@ -1113,7 +1113,7 @@ class ComfyUIInstaller:
         return False
     
     def install_triton(self):
-        """Install Triton with version constraint based on PyTorch compatibility.
+        """Install or fix Triton with version constraint based on PyTorch compatibility.
 
         Triton/PyTorch version compatibility (triton-windows):
         - Triton 3.5.x requires PyTorch >= 2.9
@@ -1121,10 +1121,11 @@ class ComfyUIInstaller:
         - Triton 3.3.x requires PyTorch >= 2.7
         - Triton 3.2.x requires PyTorch >= 2.6
 
+        If Triton is already installed but incompatible with PyTorch, it will be
+        uninstalled and reinstalled with the correct version constraint.
+
         See: https://github.com/woct0rdho/triton-windows/issues/158
         """
-        print("Installing Triton...")
-
         # Determine base package name
         if platform.system() == "Windows":
             base_package = "triton-windows"
@@ -1135,6 +1136,30 @@ class ComfyUIInstaller:
         torch_ver = self._get_torch_version()
         constraint = self._get_triton_version_constraint(torch_ver)
 
+        # Check if Triton is already installed
+        current_triton = self._get_installed_triton_version()
+
+        if current_triton:
+            is_compat, compat_msg = self._check_triton_pytorch_compatibility(current_triton, torch_ver)
+
+            if is_compat:
+                if not self.force:
+                    print(f"Triton {current_triton} is compatible with PyTorch {torch_ver} - skipping")
+                    return
+                else:
+                    print(f"Triton {current_triton} is compatible, but --force specified - reinstalling")
+            else:
+                # Incompatible - need to fix
+                print(f"Fixing Triton compatibility: {compat_msg}")
+                print(f"  Removing incompatible Triton {current_triton}...")
+                try:
+                    self.handler.pip_uninstall([base_package])
+                except Exception as e:
+                    self.logger.warning(f"Could not uninstall {base_package}: {e}")
+        else:
+            print("Installing Triton...")
+
+        # Install with constraint
         if constraint:
             package = f"{base_package}{constraint}"
             print(f"  PyTorch {torch_ver} detected - using Triton constraint: {constraint}")
@@ -1680,6 +1705,14 @@ class ComfyUIInstaller:
         # Get Triton version constraint for PyTorch compatibility
         triton_constraint = self._get_triton_version_constraint(torch_ver)
 
+        # Check Triton/PyTorch compatibility
+        triton_is_compat = True
+        triton_compat_msg = ""
+        if current_triton != "-":
+            triton_is_compat, triton_compat_msg = self._check_triton_pytorch_compatibility(
+                current_triton, torch_ver
+            )
+
         # Determine target versions
         if compat['compatible']:
             target_sa = compat['match']['sage_version']
@@ -1718,22 +1751,25 @@ class ComfyUIInstaller:
         else:
             changes.append(("PyTorch", "[KEEP]", f"{current_torch} (already installed)"))
 
-        # Triton - use pre-fetched update check results
+        # Triton - check compatibility first, then update availability
         triton_constraint_desc = f" [constraint: {triton_constraint}]" if triton_constraint else ""
         if current_triton == "-":
             changes.append(("Triton", "[INSTALL]", f"{triton_package}{triton_constraint_desc}"))
+        elif not triton_is_compat:
+            # Incompatible Triton - will be fixed (uninstall + reinstall with constraint)
+            changes.append(("Triton", "[FIX]", f"{current_triton} -> compatible version{triton_constraint_desc}"))
         else:
+            # Compatible Triton - check for updates if upgrading
             if self.upgrade:
-                # Use pre-fetched results from pip --dry-run check
                 if triton_has_update:
                     if triton_new_version:
-                        changes.append(("Triton", "[UPGRADE]", f"{current_triton} → {triton_new_version}{triton_constraint_desc}"))
+                        changes.append(("Triton", "[UPGRADE]", f"{current_triton} -> {triton_new_version}{triton_constraint_desc}"))
                     else:
-                        changes.append(("Triton", "[UPGRADE]", f"{current_triton} → (newer version available){triton_constraint_desc}"))
+                        changes.append(("Triton", "[UPGRADE]", f"{current_triton} -> (newer version available){triton_constraint_desc}"))
                 else:
-                    changes.append(("Triton", "[KEEP]", f"{current_triton} (already latest)"))
+                    changes.append(("Triton", "[KEEP]", f"{current_triton} (compatible, up to date)"))
             else:
-                changes.append(("Triton", "[KEEP]", f"{current_triton} (already installed)"))
+                changes.append(("Triton", "[KEEP]", f"{current_triton} (compatible)"))
 
         # SageAttention
         if current_sa == "-":
@@ -1761,7 +1797,7 @@ class ComfyUIInstaller:
             print(f"  {component:<15} {action:<10} {detail}")
 
         # Check if there are any actual changes to make
-        has_changes = any(action in ("[INSTALL]", "[UPGRADE]") for _, action, _ in changes)
+        has_changes = any(action in ("[INSTALL]", "[UPGRADE]", "[FIX]") for _, action, _ in changes)
 
         print()
         print("-" * 70)
