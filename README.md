@@ -76,7 +76,8 @@ For [ComfyUI Portable](https://docs.comfy.org/installation/comfyui_portable_wind
 ```bash
 # Run from your ComfyUI Portable directory
 cd C:\ComfyUI_windows_portable
-python path\to\comfyui_triton_sageattention.py --install #To install from anywhere add: --base-path C:\ComfyUI_windows_portable
+python path\to\comfyui_triton_sageattention.py --install
+# Or to run from any folder without "cd" simply add: --base-path C:\ComfyUI_windows_portable
 
 # Check what the installer detected
 python comfyui_triton_sageattention.py --show-installed --base-path C:\ComfyUI_windows_portable
@@ -89,12 +90,13 @@ The installer automatically detects the `python_embeded` folder and uses that Py
 Control which Python environment the installer uses with the `--python` flag:
 
 ```bash
-# Default --install auto-detects (portable > venv > system)  
+# Default --install auto-detects (portable > venv > system)
 # To override, use --python with one of the options:
-python comfyui_triton_sageattention.py --install --python {auto, system, venv, portable, .\path\to\venv, C:\Python312\python.exe}
+python comfyui_triton_sageattention.py --install --python {auto, system, venv, portable, .\path\...}
+# --python also supports relative / absolute paths: .\path\to\venv, C:\Python312\python.exe
 ```
 
-**Note:** To distinguish keywords from folder names, paths must include a separator (`/`, `\`, or start with `./`). For example, `--python venv` uses the keyword (venv at base-path), while `--python .\venv` uses the folder in the current directory.
+**Note:** To distinguish keywords from folder names, paths must include a separator (`/`, `\`, or start with `./`). For example, `--python venv` uses the keyword (venv at base-path), while `--python .\venv` uses the folder in the current working directory.
 
 For full parameter documentation, see [docs/parameters.md](docs/parameters.md).
 
