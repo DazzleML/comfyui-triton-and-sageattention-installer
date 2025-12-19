@@ -84,6 +84,20 @@ python comfyui_triton_sageattention.py --show-installed --base-path C:\ComfyUI_w
 
 The installer automatically detects the `python_embeded` folder and uses that Python environment instead of creating a new virtual environment. All packages are installed into the portable distribution's embedded Python.
 
+### Python Environment Selection
+
+Control which Python environment the installer uses with the `--python` flag:
+
+```bash
+# Default --install auto-detects (portable > venv > system)  
+# To override, use --python with one of the options:
+python comfyui_triton_sageattention.py --install --python {auto, system, venv, portable, .\path\to\venv, C:\Python312\python.exe}
+```
+
+**Note:** To distinguish keywords from folder names, paths must include a separator (`/`, `\`, or start with `./`). For example, `--python venv` uses the keyword (venv at base-path), while `--python .\venv` uses the folder in the current directory.
+
+For full parameter documentation, see [docs/parameters.md](docs/parameters.md).
+
 ### SageAttention Version Control
 
 Control which SageAttention version gets installed (default: SA 2.2.0.post3):

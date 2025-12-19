@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 # Version information
-__version__ = "0.6.7"
+__version__ = "0.6.8"
 
 
 def parse_sage_version(version_str: str) -> Tuple[Optional[int], Optional[str]]:
@@ -71,6 +71,47 @@ def parse_sage_version(version_str: str) -> Tuple[Optional[int], Optional[str]]:
     )
 
 
+def parse_python_specifier(value: str) -> Tuple[str, Optional[Path]]:
+    """Parse --python argument into (mode, path) tuple.
+
+    Args:
+        value: User input like "auto", "system", "portable", "venv",
+               or a path like "./venv2", "C:\\Python312\\python.exe"
+
+    Returns:
+        Tuple of (mode: str, path: Path|None)
+        - ("auto", None) for auto-detection mode
+        - ("system", None) for system Python
+        - ("portable", None) for portable distribution
+        - ("venv", None) for venv at base_path
+        - ("path", Path) for explicit path
+
+    Raises:
+        ValueError: If value is invalid
+    """
+    value = value.strip()
+    keywords = {"auto", "system", "portable", "venv"}
+
+    # Check for keywords (case-insensitive)
+    if value.lower() in keywords:
+        return (value.lower(), None)
+
+    # Check if it looks like a path (contains path separators)
+    # This distinguishes "venv" (keyword) from "./venv" or ".\venv" (path)
+    if "/" in value or "\\" in value or value.startswith("."):
+        path = Path(value)
+        # Don't resolve yet - let the handler do that with base_path context
+        return ("path", path)
+
+    # If no separator but not a keyword, treat as potential path anyway
+    # but warn that this might be ambiguous
+    raise ValueError(
+        f"Invalid --python value: '{value}'. "
+        f"Use a keyword (auto, system, portable, venv) or a path with separator "
+        f"(e.g., './venv2' or 'C:\\Python312\\python.exe')"
+    )
+
+
 class ComfyUIInstallerError(Exception):
     """Base exception for installer errors."""
     pass
@@ -78,12 +119,14 @@ class ComfyUIInstallerError(Exception):
 
 class PlatformHandler(ABC):
     """Abstract base class for platform-specific installation handlers."""
-    
-    def __init__(self, base_path: Path, logger: logging.Logger, interactive: bool = True, force: bool = False):
+
+    def __init__(self, base_path: Path, logger: logging.Logger, interactive: bool = True,
+                 force: bool = False, python_specifier: Tuple[str, Optional[Path]] = ("auto", None)):
         self.base_path = base_path
         self.logger = logger
         self.interactive = interactive
         self.force = force
+        self.python_mode, self.python_explicit_path = python_specifier
         self.python_path = None
         self.venv_path = None
         self.environment_type = "unknown"  # "portable", "venv", "system"
@@ -175,8 +218,48 @@ class WindowsHandler(PlatformHandler):
     }
     
     def _setup_python_environment(self):
-        """Setup Windows Python environment (uses python_embeded structure)."""
-        # Check if we're in a ComfyUI distribution with python_embeded
+        """Setup Windows Python environment based on python_mode.
+
+        Modes:
+            auto: portable > venv > system (default behavior)
+            system: Use system Python directly
+            portable: Require portable distribution (error if not found)
+            venv: Use/create venv at base_path (skip portable even if exists)
+            path: Use explicit path (python.exe or environment folder)
+        """
+        # Handle explicit path mode first
+        if self.python_mode == "path" and self.python_explicit_path:
+            self._setup_explicit_path()
+            return
+
+        # Handle system mode
+        if self.python_mode == "system":
+            self.python_path = Path(sys.executable)
+            self.venv_path = None
+            self.environment_type = "system"
+            self.logger.info(f"Using system Python: {self.python_path}")
+            return
+
+        # Handle portable mode (required)
+        if self.python_mode == "portable":
+            embeded_path = self.base_path / "python_embeded" / "python.exe"
+            if not embeded_path.exists():
+                raise ComfyUIInstallerError(
+                    f"--python portable specified but python_embeded not found at {self.base_path}. "
+                    f"Use --python auto to fall back to venv, or specify a different --base-path."
+                )
+            self.python_path = embeded_path
+            self.venv_path = self.base_path / "python_embeded"
+            self.environment_type = "portable"
+            self.logger.info(f"Using portable Python: {self.python_path}")
+            return
+
+        # Handle venv mode (skip portable even if exists)
+        if self.python_mode == "venv":
+            self._setup_venv_environment()
+            return
+
+        # Auto mode: portable > venv > system
         embeded_path = self.base_path / "python_embeded" / "python.exe"
         if embeded_path.exists():
             self.python_path = embeded_path
@@ -185,30 +268,91 @@ class WindowsHandler(PlatformHandler):
             self.logger.info(f"Detected ComfyUI Portable distribution")
             self.logger.info(f"Using python_embeded: {self.python_path}")
         else:
-            # Check for existing virtual environment first
-            venv_path = self.base_path / "venv"
-            venv_python = venv_path / "Scripts" / "python.exe"  # Windows venv structure
+            self._setup_venv_environment()
 
+    def _setup_explicit_path(self):
+        """Setup environment from explicit path (python.exe or folder)."""
+        path = self.python_explicit_path.resolve()
+
+        # Check if it's a Python executable
+        if path.is_file() and path.name.lower() in ("python.exe", "python3.exe", "python"):
+            if not self._validate_python_environment(path):
+                raise ComfyUIInstallerError(f"Invalid Python executable: {path}")
+            self.python_path = path
+            # Try to detect venv_path from the executable location
+            if path.parent.name == "Scripts" and (path.parent.parent / "pyvenv.cfg").exists():
+                self.venv_path = path.parent.parent
+                self.environment_type = "venv"
+            elif path.parent.name == "python_embeded":
+                self.venv_path = path.parent
+                self.environment_type = "portable"
+            else:
+                self.venv_path = None
+                self.environment_type = "system"
+            self.logger.info(f"Using explicit Python: {self.python_path}")
+            return
+
+        # Check if it's a directory (venv or portable folder)
+        if path.is_dir():
+            # Check for Windows venv structure
+            venv_python = path / "Scripts" / "python.exe"
             if venv_python.exists() and self._validate_python_environment(venv_python):
+                self.python_path = venv_python
+                self.venv_path = path
+                self.environment_type = "venv"
+                self.logger.info(f"Using explicit venv: {self.python_path}")
+                return
+
+            # Check for portable structure
+            portable_python = path / "python.exe"
+            if portable_python.exists() and self._validate_python_environment(portable_python):
+                self.python_path = portable_python
+                self.venv_path = path
+                self.environment_type = "portable"
+                self.logger.info(f"Using explicit portable Python: {self.python_path}")
+                return
+
+            raise ComfyUIInstallerError(
+                f"Could not find Python in directory: {path}. "
+                f"Expected Scripts/python.exe (venv) or python.exe (portable)."
+            )
+
+        raise ComfyUIInstallerError(
+            f"Path does not exist: {path}. "
+            f"Provide a valid path to a Python executable or environment folder."
+        )
+
+    def _setup_venv_environment(self):
+        """Setup or create venv at base_path."""
+        venv_path = self.base_path / "venv"
+        venv_python = venv_path / "Scripts" / "python.exe"
+
+        if venv_python.exists() and self._validate_python_environment(venv_python):
+            self.python_path = venv_python
+            self.venv_path = venv_path
+            self.environment_type = "venv"
+            self.logger.info(f"Using existing virtual environment: {self.python_path}")
+        else:
+            # Create new virtual environment
+            self.logger.info("Creating new virtual environment...")
+            try:
+                self.run_command([sys.executable, "-m", "venv", str(venv_path)])
                 self.python_path = venv_python
                 self.venv_path = venv_path
                 self.environment_type = "venv"
-                self.logger.info(f"Using existing virtual environment: {self.python_path}")
-            else:
-                # Create new virtual environment
-                self.logger.info("Creating new virtual environment...")
-                try:
-                    self.run_command([sys.executable, "-m", "venv", str(venv_path)])
-                    self.python_path = venv_python
-                    self.venv_path = venv_path
-                    self.environment_type = "venv"
-                    self.logger.info(f"Created virtual environment: {self.python_path}")
-                except ComfyUIInstallerError:
-                    # Fallback to system Python with warning
-                    self.python_path = Path(sys.executable)
-                    self.venv_path = None
-                    self.environment_type = "system"
-                    self.logger.warning("Could not create virtual environment, using system Python")
+                self.logger.info(f"Created virtual environment: {self.python_path}")
+            except ComfyUIInstallerError:
+                if self.python_mode == "venv":
+                    # User explicitly requested venv, don't fall back
+                    raise ComfyUIInstallerError(
+                        f"Could not create virtual environment at {venv_path}. "
+                        f"Use --python system to use system Python instead."
+                    )
+                # Auto mode: fallback to system Python with warning
+                self.python_path = Path(sys.executable)
+                self.venv_path = None
+                self.environment_type = "system"
+                self.logger.warning("Could not create virtual environment, using system Python")
     
     def _validate_python_environment(self, python_path: Path) -> bool:
         """Validate that a Python environment is functional."""
@@ -394,7 +538,79 @@ class LinuxHandler(PlatformHandler):
     }
     
     def _setup_python_environment(self):
-        """Setup Linux Python virtual environment."""
+        """Setup Linux Python environment based on python_mode.
+
+        Modes:
+            auto: venv > system (default behavior, no portable on Linux)
+            system: Use system Python directly
+            portable: Not supported on Linux (error)
+            venv: Use/create venv at base_path
+            path: Use explicit path (python executable or venv folder)
+        """
+        # Handle explicit path mode first
+        if self.python_mode == "path" and self.python_explicit_path:
+            self._setup_explicit_path()
+            return
+
+        # Handle system mode
+        if self.python_mode == "system":
+            self.python_path = Path(sys.executable)
+            self.venv_path = None
+            self.environment_type = "system"
+            self.logger.info(f"Using system Python: {self.python_path}")
+            return
+
+        # Handle portable mode (not supported on Linux)
+        if self.python_mode == "portable":
+            raise ComfyUIInstallerError(
+                "--python portable is only supported on Windows with ComfyUI Portable. "
+                "Use --python venv or --python system instead."
+            )
+
+        # Handle venv mode or auto mode (both go to venv setup)
+        self._setup_venv_environment()
+
+    def _setup_explicit_path(self):
+        """Setup environment from explicit path (python executable or folder)."""
+        path = self.python_explicit_path.resolve()
+
+        # Check if it's a Python executable
+        if path.is_file() and path.name in ("python", "python3", "python3.10", "python3.11", "python3.12", "python3.13"):
+            if not self._validate_python_environment(path):
+                raise ComfyUIInstallerError(f"Invalid Python executable: {path}")
+            self.python_path = path
+            # Try to detect venv_path from the executable location
+            if path.parent.name == "bin" and (path.parent.parent / "pyvenv.cfg").exists():
+                self.venv_path = path.parent.parent
+                self.environment_type = "venv"
+            else:
+                self.venv_path = None
+                self.environment_type = "system"
+            self.logger.info(f"Using explicit Python: {self.python_path}")
+            return
+
+        # Check if it's a directory (venv folder)
+        if path.is_dir():
+            venv_python = path / "bin" / "python"
+            if venv_python.exists() and self._validate_python_environment(venv_python):
+                self.python_path = venv_python
+                self.venv_path = path
+                self.environment_type = "venv"
+                self.logger.info(f"Using explicit venv: {self.python_path}")
+                return
+
+            raise ComfyUIInstallerError(
+                f"Could not find Python in directory: {path}. "
+                f"Expected bin/python (venv structure)."
+            )
+
+        raise ComfyUIInstallerError(
+            f"Path does not exist: {path}. "
+            f"Provide a valid path to a Python executable or venv folder."
+        )
+
+    def _setup_venv_environment(self):
+        """Setup or create venv at base_path."""
         self.venv_path = self.base_path / "venv"
         venv_python = self.venv_path / "bin" / "python"
 
@@ -432,6 +648,11 @@ class LinuxHandler(PlatformHandler):
                 try:
                     self.run_command(["virtualenv", str(self.venv_path)])
                 except (ComfyUIInstallerError, FileNotFoundError):
+                    if self.python_mode == "venv":
+                        raise ComfyUIInstallerError(
+                            "Could not create virtual environment. Install python3-venv package. "
+                            "Or use --python system to use system Python instead."
+                        )
                     raise ComfyUIInstallerError("Could not create virtual environment. Install python3-venv package.")
 
             self.python_path = venv_python
@@ -665,7 +886,79 @@ class MacOSHandler(PlatformHandler):
     """macOS-specific installation handler."""
 
     def _setup_python_environment(self):
-        """Setup macOS Python virtual environment."""
+        """Setup macOS Python environment based on python_mode.
+
+        Modes:
+            auto: venv > system (default behavior, no portable on macOS)
+            system: Use system Python directly
+            portable: Not supported on macOS (error)
+            venv: Use/create venv at base_path
+            path: Use explicit path (python executable or venv folder)
+        """
+        # Handle explicit path mode first
+        if self.python_mode == "path" and self.python_explicit_path:
+            self._setup_explicit_path()
+            return
+
+        # Handle system mode
+        if self.python_mode == "system":
+            self.python_path = Path(sys.executable)
+            self.venv_path = None
+            self.environment_type = "system"
+            self.logger.info(f"Using system Python: {self.python_path}")
+            return
+
+        # Handle portable mode (not supported on macOS)
+        if self.python_mode == "portable":
+            raise ComfyUIInstallerError(
+                "--python portable is only supported on Windows with ComfyUI Portable. "
+                "Use --python venv or --python system instead."
+            )
+
+        # Handle venv mode or auto mode (both go to venv setup)
+        self._setup_venv_environment()
+
+    def _setup_explicit_path(self):
+        """Setup environment from explicit path (python executable or folder)."""
+        path = self.python_explicit_path.resolve()
+
+        # Check if it's a Python executable
+        if path.is_file() and path.name in ("python", "python3", "python3.10", "python3.11", "python3.12", "python3.13"):
+            if not self._validate_python_environment(path):
+                raise ComfyUIInstallerError(f"Invalid Python executable: {path}")
+            self.python_path = path
+            # Try to detect venv_path from the executable location
+            if path.parent.name == "bin" and (path.parent.parent / "pyvenv.cfg").exists():
+                self.venv_path = path.parent.parent
+                self.environment_type = "venv"
+            else:
+                self.venv_path = None
+                self.environment_type = "system"
+            self.logger.info(f"Using explicit Python: {self.python_path}")
+            return
+
+        # Check if it's a directory (venv folder)
+        if path.is_dir():
+            venv_python = path / "bin" / "python"
+            if venv_python.exists() and self._validate_python_environment(venv_python):
+                self.python_path = venv_python
+                self.venv_path = path
+                self.environment_type = "venv"
+                self.logger.info(f"Using explicit venv: {self.python_path}")
+                return
+
+            raise ComfyUIInstallerError(
+                f"Could not find Python in directory: {path}. "
+                f"Expected bin/python (venv structure)."
+            )
+
+        raise ComfyUIInstallerError(
+            f"Path does not exist: {path}. "
+            f"Provide a valid path to a Python executable or venv folder."
+        )
+
+    def _setup_venv_environment(self):
+        """Setup or create venv at base_path."""
         self.venv_path = self.base_path / "venv"
         venv_python = self.venv_path / "bin" / "python"
 
@@ -698,6 +991,11 @@ class MacOSHandler(PlatformHandler):
             try:
                 self.run_command([sys.executable, "-m", "venv", str(self.venv_path)])
             except ComfyUIInstallerError:
+                if self.python_mode == "venv":
+                    raise ComfyUIInstallerError(
+                        "Could not create virtual environment. Ensure Python 3.8+ is installed. "
+                        "Or use --python system to use system Python instead."
+                    )
                 raise ComfyUIInstallerError("Could not create virtual environment. Ensure Python 3.8+ is installed.")
 
             self.python_path = venv_python
@@ -908,13 +1206,17 @@ class ComfyUIInstaller:
         "torch", "torchvision", "torchaudio"
     ]
     
-    def __init__(self, base_path: Optional[Path] = None, verbose: bool = False, interactive: bool = True, force: bool = False, sage_version: str = "auto", experimental: bool = False, upgrade: bool = False, with_custom_nodes: bool = False):
+    def __init__(self, base_path: Optional[Path] = None, verbose: bool = False,
+                 interactive: bool = True, force: bool = False, sage_version: str = "auto",
+                 experimental: bool = False, upgrade: bool = False, with_custom_nodes: bool = False,
+                 python_specifier: Tuple[str, Optional[Path]] = ("auto", None)):
         self.base_path = base_path or Path.cwd()
         self.interactive = interactive
         self.force = force
         self.experimental = experimental
         self.upgrade = upgrade
         self.with_custom_nodes = with_custom_nodes
+        self.python_specifier = python_specifier
         # Parse sage_version into (major, exact) tuple
         self.sage_version_raw = sage_version
         self.sage_version_major, self.sage_version_exact = parse_sage_version(sage_version)
@@ -940,11 +1242,14 @@ class ComfyUIInstaller:
         """Create appropriate platform handler."""
         system = platform.system()
         if system == "Windows":
-            return WindowsHandler(self.base_path, self.logger, self.interactive, self.force)
+            return WindowsHandler(self.base_path, self.logger, self.interactive, self.force,
+                                  self.python_specifier)
         elif system == "Linux":
-            return LinuxHandler(self.base_path, self.logger, self.interactive, self.force)
+            return LinuxHandler(self.base_path, self.logger, self.interactive, self.force,
+                                self.python_specifier)
         elif system == "Darwin":
-            return MacOSHandler(self.base_path, self.logger, self.interactive, self.force)
+            return MacOSHandler(self.base_path, self.logger, self.interactive, self.force,
+                                self.python_specifier)
         else:
             raise ComfyUIInstallerError(f"Unsupported platform: {system}")
     
@@ -2462,7 +2767,20 @@ Examples:
         default=Path.cwd(),
         help="Base installation directory (default: current directory)"
     )
-    
+
+    parser.add_argument(
+        "--python",
+        default="auto",
+        metavar="MODE",
+        help="Python environment to use: "
+             "'auto' (default: portable > venv > system), "
+             "'system' (use system Python directly), "
+             "'portable' (require ComfyUI Portable, Windows only), "
+             "'venv' (use/create venv at base-path). "
+             "Or specify a path: './venv2' or 'C:\\Python312\\python.exe'. "
+             "Note: paths must contain a separator (/, \\, or start with .)"
+    )
+
     parser.add_argument(
         "--verbose", "-v",
         action="store_true",
@@ -2546,6 +2864,12 @@ Examples:
         parser.print_help()
         return 1
 
+    # Parse --python specifier
+    try:
+        python_specifier = parse_python_specifier(args.python)
+    except ValueError as e:
+        parser.error(str(e))
+
     # Create installer instance
     installer = ComfyUIInstaller(
         base_path=args.base_path,
@@ -2555,7 +2879,8 @@ Examples:
         sage_version=args.sage_version,
         experimental=args.experimental,
         upgrade=args.upgrade,
-        with_custom_nodes=args.with_custom_nodes
+        with_custom_nodes=args.with_custom_nodes,
+        python_specifier=python_specifier
     )
 
     # Handle --show-installed (standalone action, exit after displaying)
