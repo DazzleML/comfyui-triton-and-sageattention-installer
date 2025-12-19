@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 # Version information
-__version__ = "0.6.6"
+__version__ = "0.6.7"
 
 
 def parse_sage_version(version_str: str) -> Tuple[Optional[int], Optional[str]]:
@@ -86,6 +86,7 @@ class PlatformHandler(ABC):
         self.force = force
         self.python_path = None
         self.venv_path = None
+        self.environment_type = "unknown"  # "portable", "venv", "system"
         self._setup_python_environment()
         
     @abstractmethod
@@ -180,15 +181,18 @@ class WindowsHandler(PlatformHandler):
         if embeded_path.exists():
             self.python_path = embeded_path
             self.venv_path = self.base_path / "python_embeded"
-            self.logger.info(f"Using existing python_embeded: {self.python_path}")
+            self.environment_type = "portable"
+            self.logger.info(f"Detected ComfyUI Portable distribution")
+            self.logger.info(f"Using python_embeded: {self.python_path}")
         else:
             # Check for existing virtual environment first
             venv_path = self.base_path / "venv"
             venv_python = venv_path / "Scripts" / "python.exe"  # Windows venv structure
-            
+
             if venv_python.exists() and self._validate_python_environment(venv_python):
                 self.python_path = venv_python
                 self.venv_path = venv_path
+                self.environment_type = "venv"
                 self.logger.info(f"Using existing virtual environment: {self.python_path}")
             else:
                 # Create new virtual environment
@@ -197,11 +201,13 @@ class WindowsHandler(PlatformHandler):
                     self.run_command([sys.executable, "-m", "venv", str(venv_path)])
                     self.python_path = venv_python
                     self.venv_path = venv_path
+                    self.environment_type = "venv"
                     self.logger.info(f"Created virtual environment: {self.python_path}")
                 except ComfyUIInstallerError:
                     # Fallback to system Python with warning
                     self.python_path = Path(sys.executable)
                     self.venv_path = None
+                    self.environment_type = "system"
                     self.logger.warning("Could not create virtual environment, using system Python")
     
     def _validate_python_environment(self, python_path: Path) -> bool:
@@ -391,10 +397,11 @@ class LinuxHandler(PlatformHandler):
         """Setup Linux Python virtual environment."""
         self.venv_path = self.base_path / "venv"
         venv_python = self.venv_path / "bin" / "python"
-        
+
         # Check if virtual environment already exists and is valid
         if venv_python.exists() and self._validate_python_environment(venv_python):
             self.python_path = venv_python
+            self.environment_type = "venv"
             self.logger.info(f"Using existing virtual environment: {self.python_path}")
         else:
             # Create or recreate virtual environment
@@ -406,6 +413,7 @@ class LinuxHandler(PlatformHandler):
                     if response.lower() != 'y':
                         # Try to use it anyway
                         self.python_path = venv_python
+                        self.environment_type = "venv"
                         self.logger.warning("Using potentially invalid virtual environment")
                         return
                     else:
@@ -414,7 +422,7 @@ class LinuxHandler(PlatformHandler):
                     # Non-interactive mode: recreate automatically
                     self.logger.info("Non-interactive mode: recreating invalid venv")
                     shutil.rmtree(self.venv_path)
-            
+
             self.logger.info("Creating Python virtual environment...")
             try:
                 # Try python3 -m venv first
@@ -425,12 +433,13 @@ class LinuxHandler(PlatformHandler):
                     self.run_command(["virtualenv", str(self.venv_path)])
                 except (ComfyUIInstallerError, FileNotFoundError):
                     raise ComfyUIInstallerError("Could not create virtual environment. Install python3-venv package.")
-            
+
             self.python_path = venv_python
-            
+            self.environment_type = "venv"
+
         if not self.python_path.exists():
             raise ComfyUIInstallerError(f"Python interpreter not found at {self.python_path}")
-        
+
         self.logger.info(f"Using Python virtual environment: {self.python_path}")
     
     def _validate_python_environment(self, python_path: Path) -> bool:
@@ -654,15 +663,16 @@ class LinuxHandler(PlatformHandler):
 
 class MacOSHandler(PlatformHandler):
     """macOS-specific installation handler."""
-    
+
     def _setup_python_environment(self):
         """Setup macOS Python virtual environment."""
         self.venv_path = self.base_path / "venv"
         venv_python = self.venv_path / "bin" / "python"
-        
+
         # Check if virtual environment already exists and is valid
         if venv_python.exists() and self._validate_python_environment(venv_python):
             self.python_path = venv_python
+            self.environment_type = "venv"
             self.logger.info(f"Using existing virtual environment: {self.python_path}")
         else:
             # Create or recreate virtual environment
@@ -674,6 +684,7 @@ class MacOSHandler(PlatformHandler):
                     if response.lower() != 'y':
                         # Try to use it anyway
                         self.python_path = venv_python
+                        self.environment_type = "venv"
                         self.logger.warning("Using potentially invalid virtual environment")
                         return
                     else:
@@ -682,18 +693,19 @@ class MacOSHandler(PlatformHandler):
                     # Non-interactive mode: recreate automatically
                     self.logger.info("Non-interactive mode: recreating invalid venv")
                     shutil.rmtree(self.venv_path)
-            
+
             self.logger.info("Creating Python virtual environment...")
             try:
                 self.run_command([sys.executable, "-m", "venv", str(self.venv_path)])
             except ComfyUIInstallerError:
                 raise ComfyUIInstallerError("Could not create virtual environment. Ensure Python 3.8+ is installed.")
-            
+
             self.python_path = venv_python
-        
+            self.environment_type = "venv"
+
         if not self.python_path.exists():
             raise ComfyUIInstallerError(f"Python interpreter not found at {self.python_path}")
-        
+
         self.logger.info(f"Using Python virtual environment: {self.python_path}")
     
     def _validate_python_environment(self, python_path: Path) -> bool:
@@ -1592,6 +1604,18 @@ class ComfyUIInstaller:
                 'message': f"Could not determine compatibility: {e}"
             }
 
+    def _get_target_python_version(self) -> str:
+        """Get Python version from the target environment (not the invoking interpreter)."""
+        try:
+            result = self.handler.run_command([
+                str(self.handler.python_path), "-c",
+                "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}')"
+            ], capture_output=True)
+            return result.stdout.strip()
+        except Exception:
+            # Fallback to invoking Python if target fails
+            return f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+
     def get_environment_info(self) -> Tuple[Dict[str, Dict[str, str]], str, str]:
         """Collect current environment information.
 
@@ -1607,7 +1631,7 @@ class ComfyUIInstaller:
         triton_version = self._get_installed_triton_version()
         torch_version = self._get_torch_version()
         cuda_code = self._get_cuda_version_from_torch()
-        python_version = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+        python_version = self._get_target_python_version()
 
         info = {
             "SageAttention": {
@@ -1658,6 +1682,10 @@ class ComfyUIInstaller:
             print(f"| {component:<15} | {version:<28} | {status:<9} |")
         print("=" * 62)
         print(f"{script_name} version: {__version__}")
+        env_type_display = self.handler.environment_type.capitalize()
+        if self.handler.environment_type == "portable":
+            env_type_display = "Portable (python_embeded)"
+        print(f"Environment: {env_type_display}")
 
         # Compatibility status
         print()
@@ -1729,8 +1757,14 @@ class ComfyUIInstaller:
         print("DRY RUN - Preview of Changes (no changes will be made)")
         print("=" * 70)
 
+        # Get environment type for display
+        env_type_display = self.handler.environment_type.capitalize()
+        if self.handler.environment_type == "portable":
+            env_type_display = "Portable (python_embeded)"
+
         print()
         print("Current Environment:")
+        print(f"  Environment:   {env_type_display}")
         print(f"  Python:        {current_python}")
         print(f"  PyTorch:       {current_torch}")
         print(f"  CUDA:          {current_cuda}")

@@ -69,6 +69,21 @@ python comfyui_triton_sageattention.py --install --base-path C:\path\to\comfyui
 python comfyui_triton_sageattention.py --cleanup
 ```
 
+### ComfyUI Portable Support
+
+For [ComfyUI Portable](https://docs.comfy.org/installation/comfyui_portable_windows) distributions (the pre-packaged version with `python_embeded` folder):
+
+```bash
+# Run from your ComfyUI Portable directory
+cd C:\ComfyUI_windows_portable
+python path\to\comfyui_triton_sageattention.py --install #To install from anywhere add: --base-path C:\ComfyUI_windows_portable
+
+# Check what the installer detected
+python comfyui_triton_sageattention.py --show-installed --base-path C:\ComfyUI_windows_portable
+```
+
+The installer automatically detects the `python_embeded` folder and uses that Python environment instead of creating a new virtual environment. All packages are installed into the portable distribution's embedded Python.
+
 ### SageAttention Version Control
 
 Control which SageAttention version gets installed (default: SA 2.2.0.post3):
