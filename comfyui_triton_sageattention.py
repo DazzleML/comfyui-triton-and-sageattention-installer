@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 # Version information
-__version__ = "0.6.8"
+__version__ = "0.6.9"
 
 
 def parse_sage_version(version_str: str) -> Tuple[Optional[int], Optional[str]]:
@@ -1353,12 +1353,16 @@ class ComfyUIInstaller:
         self.handler.pip_install(["pip", "setuptools"], ["--upgrade"])
     
     def install_pytorch(self, cuda_version: str):
-        """Install PyTorch with appropriate CUDA support."""
+        """Install PyTorch with appropriate CUDA support.
+
+        Only installs if PyTorch is missing, incompatible, or --force specified.
+        Does NOT pin a specific version - lets pip resolve the latest compatible.
+        """
         # Check if compatible PyTorch is already installed
         if not self.force and self._check_pytorch_compatibility(cuda_version):
             print("Compatible PyTorch already installed")
             return
-        
+
         if self.force and self._check_pytorch_compatibility(cuda_version):
             print("WARNING: Compatible PyTorch already installed but --force specified")
             print("This will reinstall PyTorch and may break existing installations")
@@ -1367,66 +1371,81 @@ class ComfyUIInstaller:
                 if response.lower() != 'y':
                     print("Skipping PyTorch installation")
                     return
-        
+
         print("Installing PyTorch...")
-        
+
         if cuda_version != "cpu":
             index_url = self.handler.get_pytorch_install_url(cuda_version)
             extra_args = ["--index-url", index_url]
-            packages = ["torch==2.7.0", "torchvision", "torchaudio"]
+            # Don't pin version - let pip resolve latest compatible
+            packages = ["torch", "torchvision", "torchaudio"]
         else:
             extra_args = []
             packages = ["torch", "torchvision", "torchaudio"]
-        
+
         self.handler.pip_install(packages, extra_args)
         self.installed_packages.extend(["torch", "torchvision", "torchaudio"])
     
     def _check_pytorch_compatibility(self, cuda_version: str) -> bool:
-        """Check if existing PyTorch installation is compatible."""
+        """Check if existing PyTorch installation is compatible.
+
+        Compatibility is determined by:
+        1. PyTorch 2.x is installed
+        2. For CUDA: PyTorch has CUDA support (torch.cuda.is_available())
+        3. A SageAttention wheel exists for the torch's CUDA version
+
+        NOTE: We use torch.version.cuda (runtime CUDA) for wheel matching,
+        NOT nvcc (system CUDA toolkit). Portable installs bundle their own CUDA.
+        """
         try:
             # Test if torch is importable and get version info
             result = self.handler.run_command([
                 str(self.handler.python_path), "-c",
                 "import torch; print(f'{torch.__version__}|{torch.cuda.is_available()}|{torch.version.cuda if torch.cuda.is_available() else \"None\"}')"
             ], capture_output=True)
-            
+
             version_info = result.stdout.strip().split('|')
             torch_version, cuda_available, torch_cuda_version = version_info
-            
+
             self.logger.debug(f"Found PyTorch {torch_version}, CUDA available: {cuda_available}, CUDA version: {torch_cuda_version}")
-            
+
             # Check version compatibility
             if not torch_version.startswith("2."):
                 self.logger.info("PyTorch version is not 2.x, upgrading...")
                 return False
-            
+
             # Check CUDA compatibility
             if cuda_version == "cpu":
                 # For CPU-only, any PyTorch 2.x is fine
                 self.logger.info(f"PyTorch {torch_version} compatible with CPU backend")
                 return True
             else:
-                # For CUDA, check if CUDA is available and version matches
+                # For CUDA, check if CUDA is available in PyTorch
                 if cuda_available == "False":
                     self.logger.info("Existing PyTorch is CPU-only but CUDA is available, upgrading...")
                     return False
-                
-                # Check CUDA version compatibility (allow minor version differences)
+
+                # PyTorch has CUDA support - check if we have a compatible SA2 wheel
+                # Use torch's CUDA version for wheel matching (NOT system nvcc)
                 if torch_cuda_version != "None":
-                    torch_cuda_major = torch_cuda_version.split('.')[0]
-                    system_cuda_major = cuda_version.split('.')[0]
-                    
-                    if torch_cuda_major == system_cuda_major:
-                        self.logger.info(f"PyTorch {torch_version} with CUDA {torch_cuda_version} is compatible")
+                    torch_cuda_code = torch_cuda_version.replace('.', '')
+                    torch_ver_base = torch_version.split('+')[0]
+
+                    # Check if SA2 wheel exists for this torch+cuda combo
+                    compat = self.check_compatibility(torch_ver=torch_ver_base, cuda_ver=torch_cuda_code)
+
+                    if compat['compatible']:
+                        self.logger.info(f"PyTorch {torch_version} with CUDA {torch_cuda_version} is compatible (SA2 wheel available)")
                         return True
                     else:
-                        self.logger.info(f"PyTorch CUDA version ({torch_cuda_version}) doesn't match system CUDA ({cuda_version}), upgrading...")
-                        return False
-            
+                        # No SA2 wheel, but still compatible for SA1 fallback
+                        self.logger.info(f"PyTorch {torch_version} with CUDA {torch_cuda_version} is compatible (SA1 fallback)")
+                        return True
+
         except (ComfyUIInstallerError, Exception) as e:
             self.logger.debug(f"Could not check PyTorch compatibility: {e}")
             return False
-        
+
         return False
     
     def install_triton(self):
@@ -2084,11 +2103,26 @@ class ComfyUIInstaller:
         # Show what would be installed/upgraded
         changes = []
 
-        # PyTorch (only if not installed or wrong CUDA)
+        # PyTorch - use same logic as install path (_check_pytorch_compatibility)
+        # This ensures dryrun accurately predicts what install will do
         if current_torch == "-":
             changes.append(("PyTorch", "[INSTALL]", f"PyTorch with CUDA (auto-detected)"))
         else:
-            changes.append(("PyTorch", "[KEEP]", f"{current_torch} (already installed)"))
+            # Check if install would keep or reinstall PyTorch
+            # Uses torch.version.cuda for wheel matching (not nvcc)
+            nvcc_cuda = self.handler.detect_cuda_version() or "cpu"
+            pytorch_compatible = self._check_pytorch_compatibility(nvcc_cuda)
+
+            if pytorch_compatible:
+                changes.append(("PyTorch", "[KEEP]", f"{current_torch} (already installed)"))
+            else:
+                # PyTorch needs upgrade (1.x -> 2.x, or CPU -> CUDA)
+                if not current_torch.startswith("2."):
+                    changes.append(("PyTorch", "[UPGRADE]", f"{current_torch} -> 2.x (version upgrade)"))
+                elif current_cuda == "CPU only" or current_cuda == "-":
+                    changes.append(("PyTorch", "[UPGRADE]", f"{current_torch} -> CUDA version"))
+                else:
+                    changes.append(("PyTorch", "[REINSTALL]", f"{current_torch} (compatibility fix)"))
 
         # Triton - check compatibility first, then update availability
         triton_constraint_desc = f" [constraint: {triton_constraint}]" if triton_constraint else ""
@@ -2568,6 +2602,105 @@ class ComfyUIInstaller:
             self.logger.error(f"Failed to clone {repo_name}: {e}")
             return False
     
+    def _compare_versions(self, current: str, proposed: str) -> int:
+        """Compare two version strings.
+
+        Returns:
+            -1 if current < proposed (upgrade)
+             0 if current == proposed (no change)
+             1 if current > proposed (DOWNGRADE)
+        """
+        if not current or current == "-" or not proposed or proposed == "-":
+            return 0
+
+        def parse_version(v: str) -> List[int]:
+            # Strip +suffix (e.g., "2.9.1+cu130" -> "2.9.1")
+            base = v.split('+')[0]
+            # Handle .postN suffix (e.g., "3.5.1.post23" -> [3, 5, 1, 23])
+            parts = base.replace('.post', '.').split('.')
+            return [int(p) for p in parts if p.isdigit()]
+
+        try:
+            curr_parts = parse_version(current)
+            prop_parts = parse_version(proposed)
+
+            # Compare each component
+            for c, p in zip(curr_parts, prop_parts):
+                if c < p:
+                    return -1  # upgrade
+                if c > p:
+                    return 1   # DOWNGRADE
+
+            # If all compared parts equal, longer version is "greater"
+            if len(curr_parts) < len(prop_parts):
+                return -1
+            if len(curr_parts) > len(prop_parts):
+                return 1
+
+            return 0
+        except (ValueError, AttributeError):
+            return 0
+
+    def _detect_downgrades(self, proposed_torch: Optional[str] = None,
+                           proposed_triton: Optional[str] = None) -> List[Tuple[str, str, str]]:
+        """Detect if proposed changes would result in version downgrades.
+
+        Returns:
+            List of (component, current_version, proposed_version) tuples for downgrades.
+        """
+        downgrades = []
+
+        # Get current versions
+        current_torch = self._get_torch_version()
+        current_triton = self._get_installed_triton_version()
+
+        # Check PyTorch
+        if proposed_torch and current_torch and current_torch != "-":
+            if self._compare_versions(current_torch, proposed_torch) > 0:
+                downgrades.append(("PyTorch", current_torch, proposed_torch))
+
+        # Check Triton
+        if proposed_triton and current_triton and current_triton != "-":
+            if self._compare_versions(current_triton, proposed_triton) > 0:
+                downgrades.append(("Triton", current_triton, proposed_triton))
+
+        return downgrades
+
+    def _confirm_downgrade(self, downgrades: List[Tuple[str, str, str]]) -> bool:
+        """Prompt user to confirm downgrades.
+
+        Args:
+            downgrades: List of (component, current, proposed) tuples
+
+        Returns:
+            True if user confirms, False to abort.
+        """
+        if not downgrades:
+            return True
+
+        print()
+        print("=" * 60)
+        print("⚠️  DOWNGRADE DETECTED")
+        print("=" * 60)
+        print()
+        print("The following components will be downgraded:")
+        for component, current, proposed in downgrades:
+            print(f"  {component}: {current} → {proposed}")
+        print()
+        print("This may break your existing ComfyUI setup.")
+        print()
+        print("Tip: Use --backup to create a backup before proceeding.")
+        print("     See --help for backup options.")
+        print()
+
+        if not self.interactive:
+            print("Non-interactive mode: aborting to prevent unintended downgrade.")
+            print("Use --force to override this safety check.")
+            return False
+
+        response = input("Proceed with downgrade? [y/N]: ").strip().lower()
+        return response == 'y'
+
     def _get_torch_version(self) -> str:
         """Get installed PyTorch version."""
         try:
@@ -2577,7 +2710,7 @@ class ComfyUIInstaller:
             ], capture_output=True)
             return result.stdout.strip()
         except Exception:
-            return "2.7.0"  # Default to latest
+            return ""  # Return empty if not installed
     
     def _get_cuda_version_from_torch(self) -> str:
         """Get CUDA version from PyTorch."""
