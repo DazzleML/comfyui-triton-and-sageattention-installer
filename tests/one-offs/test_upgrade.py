@@ -51,6 +51,46 @@ def get_installed_version():
     return None
 
 
+def get_pytorch_version():
+    """Get installed PyTorch version (major.minor)."""
+    result = subprocess.run(
+        [str(PYTHON_EXE), "-c", "import torch; print(torch.__version__.split('+')[0])"],
+        capture_output=True, text=True
+    )
+    if result.returncode == 0:
+        version = result.stdout.strip()
+        parts = version.split(".")
+        if len(parts) >= 2:
+            return f"{parts[0]}.{parts[1]}"
+    return None
+
+
+def is_sa_version_compatible(sa_version: str, torch_version: str) -> bool:
+    """Check if SA version has wheels for the given PyTorch version.
+
+    Based on the wheel matrix:
+    - SA 2.2.0.postX: PyTorch >= 2.7 (ABI3 wheels)
+    - SA 2.1.1: PyTorch 2.5-2.8 only (no 2.9+ support)
+    - SA 1.0.6: Any PyTorch (from PyPI, no wheel needed)
+    """
+    if sa_version.startswith("1."):
+        return True  # SA1 is always available from PyPI
+
+    torch_parts = torch_version.split(".")
+    torch_minor = int(torch_parts[1]) if len(torch_parts) >= 2 else 0
+
+    if sa_version == "2.1.1":
+        # SA 2.1.1 only has wheels for PyTorch 2.5-2.8
+        return torch_minor <= 8
+
+    if sa_version.startswith("2.2.0"):
+        # SA 2.2.0+ has ABI3 wheels for PyTorch >= 2.7
+        return torch_minor >= 7
+
+    # Default: assume compatible
+    return True
+
+
 def uninstall_sageattention():
     """Uninstall sageattention."""
     print(f"{Colors.YELLOW}Uninstalling sageattention...{Colors.END}")
@@ -183,38 +223,58 @@ def main():
         print(f"{Colors.RED}ERROR: Installer not found: {INSTALLER_PATH}{Colors.END}")
         sys.exit(1)
 
-    tests = [
-        # (test_num, description, setup_fn, upgrade_args, expected_version_contains)
+    # Get current PyTorch version for compatibility checks
+    torch_ver = get_pytorch_version()
+    print(f"Detected PyTorch version: {torch_ver}")
 
+    # Build test matrix with compatibility awareness
+    # (test_num, description, setup_fn, upgrade_args, expected_version_contains, required_sa_version)
+    all_tests = [
         # Test 1: Primary use case - upgrade from SA 1.0.6 to SA 2.x
         (1, "Upgrade from SA 1.0.6 to SA 2.x (primary use case)",
          lambda: (uninstall_sageattention(), install_specific_version("1.0.6")),
          [],  # Just --upgrade, no other args
-         "2.2.0"),  # Should get latest SA2
+         "2.2.0",  # Should get latest SA2
+         None),  # No specific SA version required
 
-        # Test 2: Upgrade with explicit --sage-version
+        # Test 2: Upgrade with explicit --sage-version 2.1.1
+        # Note: SA 2.1.1 only has wheels for PyTorch <= 2.8
         (2, "Upgrade with --sage-version 2.1.1",
          lambda: uninstall_sageattention(),
          ["--sage-version", "2.1.1"],
-         "2.1.1"),
+         "2.1.1",
+         "2.1.1"),  # Requires SA 2.1.1 compatibility
 
         # Test 3: Upgrade when nothing installed (should just install)
         (3, "Upgrade with no existing installation",
          lambda: uninstall_sageattention(),
          [],
-         "2.2.0"),  # Should install latest SA2
+         "2.2.0",  # Should install latest SA2
+         None),
 
         # Test 4: Upgrade within SA2 (2.1.x to 2.2.x)
+        # Note: SA 2.1.1 only has wheels for PyTorch <= 2.8
         (4, "Upgrade from SA 2.1.1 to SA 2.2.x",
          lambda: (uninstall_sageattention(), install_via_installer("2.1.1")),
          [],  # Just --upgrade, should go to latest
-         "2.2.0"),  # Should upgrade to 2.2.0.post3
+         "2.2.0",  # Should upgrade to 2.2.0.post3
+         "2.1.1"),  # Requires SA 2.1.1 for setup
     ]
 
     results = []
 
-    for test_num, description, setup_fn, upgrade_args, expected in tests:
+    for test_num, description, setup_fn, upgrade_args, expected, required_sa in all_tests:
         if args.test is not None and args.test != test_num:
+            continue
+
+        # Check if this test requires an SA version that's not compatible
+        if required_sa and torch_ver and not is_sa_version_compatible(required_sa, torch_ver):
+            print(f"\n{Colors.BOLD}{'='*70}{Colors.END}")
+            print(f"{Colors.YELLOW}TEST {test_num}: {description}{Colors.END}")
+            print('='*70)
+            print(f"{Colors.YELLOW}[SKIP] SA {required_sa} not compatible with PyTorch {torch_ver}{Colors.END}")
+            print(f"       SA 2.1.1 requires PyTorch <= 2.8 (you have {torch_ver})")
+            results.append((test_num, description, None))  # None = skipped
             continue
 
         passed = run_test(test_num, description, setup_fn, upgrade_args, expected)
@@ -225,18 +285,28 @@ def main():
     print(f"{Colors.BOLD}TEST SUMMARY{Colors.END}")
     print('='*70)
 
-    passed_count = sum(1 for _, _, p in results if p)
+    passed_count = sum(1 for _, _, p in results if p is True)
+    skipped_count = sum(1 for _, _, p in results if p is None)
+    failed_count = sum(1 for _, _, p in results if p is False)
     total_count = len(results)
 
     for test_num, description, passed in results:
-        status = f"{Colors.GREEN}PASS{Colors.END}" if passed else f"{Colors.RED}FAIL{Colors.END}"
+        if passed is None:
+            status = f"{Colors.YELLOW}SKIP{Colors.END}"
+        elif passed:
+            status = f"{Colors.GREEN}PASS{Colors.END}"
+        else:
+            status = f"{Colors.RED}FAIL{Colors.END}"
         print(f"  Test {test_num}: [{status}] {description}")
 
     print('='*70)
-    if passed_count == total_count:
-        print(f"{Colors.GREEN}All {total_count} tests passed!{Colors.END}")
+    if failed_count == 0:
+        if skipped_count > 0:
+            print(f"{Colors.GREEN}{passed_count} passed, {skipped_count} skipped (incompatible SA versions){Colors.END}")
+        else:
+            print(f"{Colors.GREEN}All {total_count} tests passed!{Colors.END}")
     else:
-        print(f"{Colors.RED}{passed_count}/{total_count} tests passed{Colors.END}")
+        print(f"{Colors.RED}{passed_count} passed, {failed_count} failed, {skipped_count} skipped{Colors.END}")
         sys.exit(1)
 
     # Restore to stable version

@@ -52,6 +52,46 @@ def get_installed_version():
     return None
 
 
+def get_pytorch_version():
+    """Get installed PyTorch version (major.minor)."""
+    result = subprocess.run(
+        [str(PYTHON_EXE), "-c", "import torch; print(torch.__version__.split('+')[0])"],
+        capture_output=True, text=True
+    )
+    if result.returncode == 0:
+        version = result.stdout.strip()
+        parts = version.split(".")
+        if len(parts) >= 2:
+            return f"{parts[0]}.{parts[1]}"
+    return None
+
+
+def is_sa_version_compatible(sa_version: str, torch_version: str) -> bool:
+    """Check if SA version has wheels for the given PyTorch version.
+
+    Based on the wheel matrix:
+    - SA 2.2.0.postX: PyTorch >= 2.7 (ABI3 wheels)
+    - SA 2.1.1: PyTorch 2.5-2.8 only (no 2.9+ support)
+    - SA 1.0.6: Any PyTorch (from PyPI, no wheel needed)
+    """
+    if sa_version.startswith("1."):
+        return True  # SA1 is always available from PyPI
+
+    torch_parts = torch_version.split(".")
+    torch_minor = int(torch_parts[1]) if len(torch_parts) >= 2 else 0
+
+    if sa_version == "2.1.1":
+        # SA 2.1.1 only has wheels for PyTorch 2.5-2.8
+        return torch_minor <= 8
+
+    if sa_version.startswith("2.2.0"):
+        # SA 2.2.0+ has ABI3 wheels for PyTorch >= 2.7
+        return torch_minor >= 7
+
+    # Default: assume compatible
+    return True
+
+
 def uninstall_sageattention():
     """Uninstall sageattention to start fresh."""
     print(f"{Colors.YELLOW}Uninstalling sageattention...{Colors.END}")
@@ -146,28 +186,43 @@ def main():
     print("\nDetecting current environment...")
     subprocess.run([str(PYTHON_EXE), str(INSTALLER_PATH), "--base-path", str(COMFYUI_PATH)])
 
+    # Get current PyTorch version for compatibility checks
+    torch_ver = get_pytorch_version()
+    print(f"\nDetected PyTorch version: {torch_ver}")
+
+    # (test_num, description, args, expected_version_contains, required_sa_version)
     tests = [
-        # (test_num, description, args, expected_version_contains)
         (1, "Default install -> SA 2.2.0.post3",
-         ["--install"], "2.2.0"),
+         ["--install"], "2.2.0", None),
 
         (2, "--sage-version 2 -> latest SA2 (2.2.0.post3)",
-         ["--install", "--sage-version", "2"], "2.2.0"),
+         ["--install", "--sage-version", "2"], "2.2.0", None),
 
         (3, "--sage-version 1 -> SA 1.0.6",
-         ["--install", "--sage-version", "1"], "1.0.6"),
+         ["--install", "--sage-version", "1"], "1.0.6", None),
 
+        # SA 2.1.1 only has wheels for PyTorch <= 2.8
         (4, "--sage-version 2.1.1 -> specific version",
-         ["--install", "--sage-version", "2.1.1"], "2.1.1"),
+         ["--install", "--sage-version", "2.1.1"], "2.1.1", "2.1.1"),
 
         (5, "--experimental flag with default install",
-         ["--install", "--experimental"], "2.2.0"),  # Could be post3 or post4
+         ["--install", "--experimental"], "2.2.0", None),  # Could be post3 or post4
     ]
 
     results = []
 
-    for test_num, description, test_args, expected in tests:
+    for test_num, description, test_args, expected, required_sa in tests:
         if args.test is not None and args.test != test_num:
+            continue
+
+        # Check if this test requires an SA version that's not compatible
+        if required_sa and torch_ver and not is_sa_version_compatible(required_sa, torch_ver):
+            print(f"\n{Colors.BOLD}{'='*70}{Colors.END}")
+            print(f"{Colors.YELLOW}TEST {test_num}: {description}{Colors.END}")
+            print('='*70)
+            print(f"{Colors.YELLOW}[SKIP] SA {required_sa} not compatible with PyTorch {torch_ver}{Colors.END}")
+            print(f"       SA 2.1.1 requires PyTorch <= 2.8 (you have {torch_ver})")
+            results.append((test_num, description, None))  # None = skipped
             continue
 
         if not args.skip_cleanup:
@@ -181,18 +236,28 @@ def main():
     print(f"{Colors.BOLD}TEST SUMMARY{Colors.END}")
     print('='*70)
 
-    passed_count = sum(1 for _, _, p in results if p)
+    passed_count = sum(1 for _, _, p in results if p is True)
+    skipped_count = sum(1 for _, _, p in results if p is None)
+    failed_count = sum(1 for _, _, p in results if p is False)
     total_count = len(results)
 
     for test_num, description, passed in results:
-        status = f"{Colors.GREEN}PASS{Colors.END}" if passed else f"{Colors.RED}FAIL{Colors.END}"
+        if passed is None:
+            status = f"{Colors.YELLOW}SKIP{Colors.END}"
+        elif passed:
+            status = f"{Colors.GREEN}PASS{Colors.END}"
+        else:
+            status = f"{Colors.RED}FAIL{Colors.END}"
         print(f"  Test {test_num}: [{status}] {description}")
 
     print('='*70)
-    if passed_count == total_count:
-        print(f"{Colors.GREEN}All {total_count} tests passed!{Colors.END}")
+    if failed_count == 0:
+        if skipped_count > 0:
+            print(f"{Colors.GREEN}{passed_count} passed, {skipped_count} skipped (incompatible SA versions){Colors.END}")
+        else:
+            print(f"{Colors.GREEN}All {total_count} tests passed!{Colors.END}")
     else:
-        print(f"{Colors.RED}{passed_count}/{total_count} tests passed{Colors.END}")
+        print(f"{Colors.RED}{passed_count} passed, {failed_count} failed, {skipped_count} skipped{Colors.END}")
         sys.exit(1)
 
 

@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 # Version information
-__version__ = "0.6.10"
+__version__ = "0.6.11"
 
 
 def parse_sage_version(version_str: str) -> Tuple[Optional[int], Optional[str]]:
@@ -1753,6 +1753,10 @@ class ComfyUIInstaller:
     def _check_triton_pytorch_compatibility(self, triton_ver: str, torch_ver: str) -> Tuple[bool, str]:
         """Check if installed Triton version is compatible with PyTorch.
 
+        This check is bidirectional:
+        1. Forward: Is PyTorch new enough for this Triton version?
+        2. Reverse: Is Triton new enough for this PyTorch version?
+
         Args:
             triton_ver: Triton version string (e.g., "3.5.1.post22")
             torch_ver: PyTorch version string (e.g., "2.7.0")
@@ -1771,27 +1775,51 @@ class ComfyUIInstaller:
             torch_major = int(torch_parts[0])
             torch_minor = int(torch_parts[1].split("+")[0])
 
-            # Check compatibility based on the matrix
+            # === Forward check: Is PyTorch new enough for this Triton? ===
+            # Triton X.Y requires PyTorch >= Z
             if (triton_major, triton_minor) >= (3, 5):
                 required_torch = (2, 9)
-                required_str = "2.9"
+                required_torch_str = "2.9"
             elif (triton_major, triton_minor) >= (3, 4):
                 required_torch = (2, 8)
-                required_str = "2.8"
+                required_torch_str = "2.8"
             elif (triton_major, triton_minor) >= (3, 3):
                 required_torch = (2, 7)
-                required_str = "2.7"
+                required_torch_str = "2.7"
             elif (triton_major, triton_minor) >= (3, 2):
                 required_torch = (2, 6)
-                required_str = "2.6"
+                required_torch_str = "2.6"
             else:
-                # Older Triton, assume compatible
-                return True, "Compatible (legacy Triton)"
+                # Very old Triton, assume compatible
+                required_torch = (2, 0)
+                required_torch_str = "2.0"
 
-            if (torch_major, torch_minor) >= required_torch:
-                return True, f"Compatible (Triton {triton_major}.{triton_minor}.x works with PyTorch >= {required_str})"
+            if (torch_major, torch_minor) < required_torch:
+                return False, f"INCOMPATIBLE: Triton {triton_major}.{triton_minor}.x requires PyTorch >= {required_torch_str} (you have {torch_major}.{torch_minor})"
+
+            # === Reverse check: Is Triton new enough for this PyTorch? ===
+            # PyTorch X.Y expects Triton >= Z for optimal compatibility
+            if (torch_major, torch_minor) >= (2, 9):
+                recommended_triton = (3, 5)
+                recommended_triton_str = "3.5"
+            elif (torch_major, torch_minor) >= (2, 8):
+                recommended_triton = (3, 4)
+                recommended_triton_str = "3.4"
+            elif (torch_major, torch_minor) >= (2, 7):
+                recommended_triton = (3, 3)
+                recommended_triton_str = "3.3"
+            elif (torch_major, torch_minor) >= (2, 6):
+                recommended_triton = (3, 2)
+                recommended_triton_str = "3.2"
             else:
-                return False, f"INCOMPATIBLE: Triton {triton_major}.{triton_minor}.x requires PyTorch >= {required_str} (you have {torch_major}.{torch_minor})"
+                # Older PyTorch, any Triton should work
+                recommended_triton = (3, 0)
+                recommended_triton_str = "3.0"
+
+            if (triton_major, triton_minor) < recommended_triton:
+                return False, f"OUTDATED: PyTorch {torch_major}.{torch_minor} works best with Triton >= {recommended_triton_str} (you have {triton_major}.{triton_minor})"
+
+            return True, f"Compatible (Triton {triton_major}.{triton_minor}.x with PyTorch {torch_major}.{torch_minor})"
         except (ValueError, IndexError):
             return True, "Unknown (could not parse versions)"
 
