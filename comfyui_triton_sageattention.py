@@ -24,11 +24,12 @@ import tempfile
 import urllib.request
 import zipfile
 from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 # Version information
-__version__ = "0.6.9"
+__version__ = "0.6.10"
 
 
 def parse_sage_version(version_str: str) -> Tuple[Optional[int], Optional[str]]:
@@ -110,6 +111,102 @@ def parse_python_specifier(value: str) -> Tuple[str, Optional[Path]]:
         f"Use a keyword (auto, system, portable, venv) or a path with separator "
         f"(e.g., './venv2' or 'C:\\Python312\\python.exe')"
     )
+
+
+# =============================================================================
+# InstallPlan Data Structures - Single Source of Truth for Installation Decisions
+# =============================================================================
+
+@dataclass
+class EnvironmentState:
+    """Current state of the target environment.
+
+    Captures all relevant version and configuration information
+    needed to make installation decisions.
+    """
+    # PyTorch state
+    torch_version: Optional[str] = None       # e.g., "2.9.1+cu130" or None
+    torch_cuda: Optional[str] = None          # torch.version.cuda, e.g., "13.0"
+    torch_cuda_available: bool = False        # torch.cuda.is_available()
+
+    # System CUDA
+    nvcc_cuda: Optional[str] = None           # nvcc --version, e.g., "12.8"
+
+    # Other components
+    triton_version: Optional[str] = None      # e.g., "3.5.1" or None
+    sageattention_version: Optional[str] = None  # e.g., "2.2.0.post3" or None
+
+    # Environment info
+    python_version: str = ""                  # e.g., "3.12.0"
+    environment_type: str = ""                # "venv", "portable", "system"
+
+
+@dataclass
+class ComponentAction:
+    """Planned action for a single component.
+
+    Represents what will happen to one component (PyTorch, Triton, SA)
+    during installation.
+    """
+    component: str                            # "PyTorch", "Triton", "SageAttention"
+    action: str                               # "KEEP", "INSTALL", "UPGRADE", "REINSTALL", "FIX"
+    current_version: Optional[str] = None     # What's installed now
+    target_version: Optional[str] = None      # What will be installed
+    reason: str = ""                          # Human-readable explanation
+    details: Optional[str] = None             # Additional info (wheel URL, constraints)
+
+    def __str__(self) -> str:
+        if self.action == "KEEP":
+            return f"{self.component}: [KEEP] {self.current_version}"
+        elif self.action == "INSTALL":
+            return f"{self.component}: [INSTALL] {self.target_version}"
+        else:
+            return f"{self.component}: [{self.action}] {self.current_version} -> {self.target_version}"
+
+
+@dataclass
+class InstallPlan:
+    """Complete installation plan - single source of truth.
+
+    This dataclass captures the entire planned installation,
+    used by both preview_changes() and install() to ensure
+    dryrun accurately predicts what install will do.
+    """
+    # Current environment state
+    current: EnvironmentState = field(default_factory=EnvironmentState)
+
+    # CUDA version to use for wheel matching
+    # Priority: torch.version.cuda if exists, else nvcc
+    cuda_for_wheels: str = "cpu"
+
+    # Planned actions for each component
+    actions: List[ComponentAction] = field(default_factory=list)
+
+    # Warnings to display to user
+    warnings: List[str] = field(default_factory=list)
+
+    # Whether backup is recommended before proceeding
+    backup_recommended: bool = False
+
+    # Wheel compatibility info (for display)
+    sa_wheel_url: Optional[str] = None
+    sa_wheel_available: bool = False
+
+    def has_changes(self) -> bool:
+        """Check if any components will be modified."""
+        return any(a.action != "KEEP" for a in self.actions)
+
+    def has_downgrades(self) -> bool:
+        """Check if any components will be downgraded."""
+        return any(a.action == "DOWNGRADE" for a in self.actions)
+
+    def has_destructive_changes(self) -> bool:
+        """Check if changes could break existing setup."""
+        return any(a.action in ("REINSTALL", "DOWNGRADE", "FIX") for a in self.actions)
+
+    def get_action(self, component: str) -> Optional[ComponentAction]:
+        """Get the action for a specific component."""
+        return next((a for a in self.actions if a.component == component), None)
 
 
 class ComfyUIInstallerError(Exception):
@@ -1377,11 +1474,12 @@ class ComfyUIInstaller:
         if cuda_version != "cpu":
             index_url = self.handler.get_pytorch_install_url(cuda_version)
             extra_args = ["--index-url", index_url]
-            # Don't pin version - let pip resolve latest compatible
-            packages = ["torch", "torchvision", "torchaudio"]
+            # Minimum version constraint ensures SA2 wheel compatibility
+            # Let pip resolve latest compatible version within constraint
+            packages = ["torch>=2.5.0", "torchvision", "torchaudio"]
         else:
             extra_args = []
-            packages = ["torch", "torchvision", "torchaudio"]
+            packages = ["torch>=2.5.0", "torchvision", "torchaudio"]
 
         self.handler.pip_install(packages, extra_args)
         self.installed_packages.extend(["torch", "torchvision", "torchaudio"])
@@ -1940,6 +2038,455 @@ class ComfyUIInstaller:
             # Fallback to invoking Python if target fails
             return f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
 
+    # =========================================================================
+    # InstallPlan Methods - Unified Planning for Dryrun and Install
+    # =========================================================================
+
+    def _detect_current_environment(self) -> EnvironmentState:
+        """Detect current state of the target environment.
+
+        Returns an EnvironmentState with all version information needed
+        for making installation decisions.
+        """
+        state = EnvironmentState()
+
+        # Get Python version
+        state.python_version = self._get_target_python_version()
+        state.environment_type = self.handler.environment_type
+
+        # Get PyTorch info
+        try:
+            result = self.handler.run_command([
+                str(self.handler.python_path), "-c",
+                "import torch; print(f'{torch.__version__}|{torch.cuda.is_available()}|{torch.version.cuda if torch.cuda.is_available() else \"None\"}')"
+            ], capture_output=True)
+            parts = result.stdout.strip().split("|")
+            if len(parts) == 3:
+                state.torch_version = parts[0]
+                state.torch_cuda_available = parts[1].lower() == "true"
+                state.torch_cuda = parts[2] if parts[2] != "None" else None
+        except Exception:
+            pass  # PyTorch not installed
+
+        # Get system CUDA (nvcc)
+        state.nvcc_cuda = self.handler.detect_cuda_version()
+
+        # Get Triton version
+        state.triton_version = self._get_installed_triton_version()
+
+        # Get SageAttention version
+        state.sageattention_version = self._get_installed_sageattention_version()
+
+        return state
+
+    def _get_cuda_for_wheels(self, state: EnvironmentState) -> str:
+        """Determine which CUDA version to use for wheel matching.
+
+        Priority:
+        1. torch.version.cuda if PyTorch is installed with CUDA
+        2. nvcc --version if no PyTorch or CPU-only PyTorch
+        3. "cpu" if neither available
+
+        This ensures portable installs (which bundle their own CUDA) work correctly.
+        """
+        # If torch has CUDA, use that (handles portable installs)
+        if state.torch_cuda:
+            self.logger.debug(f"Using torch CUDA for wheel matching: {state.torch_cuda}")
+            return state.torch_cuda.replace(".", "")
+
+        # Otherwise use system CUDA
+        if state.nvcc_cuda:
+            self.logger.debug(f"Using system CUDA for wheel matching: {state.nvcc_cuda}")
+            return state.nvcc_cuda.replace(".", "")
+
+        return "cpu"
+
+    def _plan_pytorch_action(self, state: EnvironmentState, cuda_for_wheels: str) -> ComponentAction:
+        """Determine what action to take for PyTorch.
+
+        Rules (future-proof):
+        1. No PyTorch → INSTALL
+        2. PyTorch 1.x → UPGRADE to 2.x
+        3. PyTorch 2.x+ with CUDA → KEEP (even if newer than we know about)
+        4. PyTorch 2.x+ CPU-only but system has CUDA → UPGRADE
+        5. --force → REINSTALL
+
+        Key principle: Never downgrade a working PyTorch installation.
+        """
+        if self.force:
+            return ComponentAction(
+                component="PyTorch",
+                action="REINSTALL",
+                current_version=state.torch_version,
+                target_version="latest",
+                reason="Force mode enabled"
+            )
+
+        if not state.torch_version:
+            target_cuda = state.nvcc_cuda or "cpu"
+            return ComponentAction(
+                component="PyTorch",
+                action="INSTALL",
+                current_version=None,
+                target_version=f">=2.5.0 (CUDA {target_cuda})" if target_cuda != "cpu" else ">=2.5.0 (CPU)",
+                reason="PyTorch not installed"
+            )
+
+        # Check if PyTorch 1.x (needs upgrade)
+        if not state.torch_version.startswith("2.") and not state.torch_version.startswith("3."):
+            # Handle versions like 1.13.0
+            return ComponentAction(
+                component="PyTorch",
+                action="UPGRADE",
+                current_version=state.torch_version,
+                target_version="2.x",
+                reason="PyTorch 1.x detected, upgrading to 2.x for SA compatibility"
+            )
+
+        # PyTorch 2.x or 3.x with CUDA → KEEP
+        if state.torch_cuda_available and state.torch_cuda:
+            return ComponentAction(
+                component="PyTorch",
+                action="KEEP",
+                current_version=state.torch_version,
+                target_version=None,
+                reason=f"PyTorch {state.torch_version} with CUDA {state.torch_cuda}"
+            )
+
+        # PyTorch 2.x+ CPU-only but system has CUDA → offer upgrade
+        if state.nvcc_cuda and state.nvcc_cuda != "cpu":
+            return ComponentAction(
+                component="PyTorch",
+                action="UPGRADE",
+                current_version=state.torch_version,
+                target_version=f"2.x+cu{state.nvcc_cuda.replace('.', '')}",
+                reason="CPU-only PyTorch but CUDA available"
+            )
+
+        # CPU mode - keep it
+        return ComponentAction(
+            component="PyTorch",
+            action="KEEP",
+            current_version=state.torch_version,
+            target_version=None,
+            reason="CPU mode"
+        )
+
+    def _plan_triton_action(self, state: EnvironmentState, torch_version: Optional[str]) -> ComponentAction:
+        """Determine what action to take for Triton.
+
+        Rules (future-proof):
+        1. No Triton → INSTALL
+        2. Triton incompatible with PyTorch → FIX
+        3. Triton compatible → KEEP (even if newer than we know about)
+        4. --upgrade and update available → UPGRADE
+
+        Key principle: Assume newer Triton versions are compatible unless proven otherwise.
+        """
+        triton_package = "triton-windows" if sys.platform == "win32" else "triton"
+        constraint = self._get_triton_version_constraint(torch_version) if torch_version else None
+
+        if not state.triton_version:
+            return ComponentAction(
+                component="Triton",
+                action="INSTALL",
+                current_version=None,
+                target_version=triton_package,
+                reason="Triton not installed",
+                details=f"constraint: {constraint}" if constraint else None
+            )
+
+        # Check compatibility if we have a PyTorch version
+        if torch_version:
+            is_compat, compat_msg = self._check_triton_pytorch_compatibility(
+                state.triton_version, torch_version
+            )
+            if not is_compat:
+                return ComponentAction(
+                    component="Triton",
+                    action="FIX",
+                    current_version=state.triton_version,
+                    target_version="compatible version",
+                    reason=compat_msg,
+                    details=f"constraint: {constraint}" if constraint else None
+                )
+
+        # Compatible - check for upgrades if requested
+        if self.upgrade:
+            has_update, new_version = self._check_package_update_available(triton_package)
+            if has_update:
+                return ComponentAction(
+                    component="Triton",
+                    action="UPGRADE",
+                    current_version=state.triton_version,
+                    target_version=new_version or "newer",
+                    reason="Update available",
+                    details=f"constraint: {constraint}" if constraint else None
+                )
+
+        return ComponentAction(
+            component="Triton",
+            action="KEEP",
+            current_version=state.triton_version,
+            target_version=None,
+            reason="Compatible with PyTorch"
+        )
+
+    def _plan_sageattention_action(self, state: EnvironmentState, cuda_for_wheels: str,
+                                    torch_version: Optional[str]) -> ComponentAction:
+        """Determine what action to take for SageAttention.
+
+        Rules (future-proof):
+        1. No SA → INSTALL (SA2 if wheel available, else SA1)
+        2. SA installed and user requested specific version → handle appropriately
+        3. SA installed and --upgrade → check for updates
+        4. SA installed (unknown version) → KEEP (don't touch user's install)
+
+        Key principle: Never downgrade user's SA. If they have SA 3.x, keep it.
+        """
+        torch_ver_short = torch_version.split("+")[0] if torch_version else ""
+
+        # Check SA2 wheel availability
+        # Note: check_compatibility uses target python from self.handler
+        compat = self.check_compatibility(
+            torch_ver=torch_ver_short,
+            cuda_ver=cuda_for_wheels
+        )
+
+        # Determine target version
+        if compat['compatible']:
+            target_version = compat['match']['sage_version']
+            target_type = "SA 2.x (~3x speedup)"
+            wheel_url = compat['match']['wheel_url']
+        else:
+            target_version = "1.0.6"
+            target_type = "SA 1.x (~2.1x speedup)"
+            wheel_url = "PyPI"
+
+        # Not installed → INSTALL
+        if not state.sageattention_version:
+            return ComponentAction(
+                component="SageAttention",
+                action="INSTALL",
+                current_version=None,
+                target_version=f"{target_version} - {target_type}",
+                reason="SageAttention not installed",
+                details=wheel_url
+            )
+
+        # Parse current major version
+        current_major = self._parse_sageattention_major_version(state.sageattention_version)
+
+        # If user has a version newer than what we know about → KEEP
+        # (They may have manually installed a newer version)
+        if current_major and current_major > 2:
+            return ComponentAction(
+                component="SageAttention",
+                action="KEEP",
+                current_version=state.sageattention_version,
+                target_version=None,
+                reason=f"User has SA {current_major}.x (newer than installer knows)"
+            )
+
+        # Check if already at target version
+        if self._sageattention_version_matches(state.sageattention_version, target_version):
+            return ComponentAction(
+                component="SageAttention",
+                action="KEEP",
+                current_version=state.sageattention_version,
+                target_version=None,
+                reason="Already at target version"
+            )
+
+        # --upgrade mode
+        if self.upgrade:
+            target_major = 2 if compat['compatible'] else 1
+            if current_major == target_major:
+                return ComponentAction(
+                    component="SageAttention",
+                    action="UPGRADE",
+                    current_version=state.sageattention_version,
+                    target_version=f"{target_version} - {target_type}",
+                    reason="Newer version available",
+                    details=wheel_url
+                )
+            else:
+                # Major version change (1→2 or 2→1)
+                return ComponentAction(
+                    component="SageAttention",
+                    action="UPGRADE",
+                    current_version=state.sageattention_version,
+                    target_version=f"{target_version} - {target_type}",
+                    reason=f"SA{current_major} → SA{target_major} (wheel availability)",
+                    details=wheel_url
+                )
+
+        # Not upgrading → KEEP existing
+        return ComponentAction(
+            component="SageAttention",
+            action="KEEP",
+            current_version=state.sageattention_version,
+            target_version=None,
+            reason="Already installed"
+        )
+
+    def plan_installation(self) -> InstallPlan:
+        """Build complete installation plan.
+
+        This is the SINGLE SOURCE OF TRUTH for what will happen during
+        installation. Used by both preview_changes() and install() to
+        ensure dryrun accurately predicts install behavior.
+        """
+        # Detect current environment
+        state = self._detect_current_environment()
+
+        # Determine CUDA for wheel matching
+        cuda_for_wheels = self._get_cuda_for_wheels(state)
+
+        # Get torch version for compatibility checks
+        torch_version = state.torch_version
+
+        # Create plan
+        plan = InstallPlan(
+            current=state,
+            cuda_for_wheels=cuda_for_wheels
+        )
+
+        # Plan actions for each component
+        plan.actions.append(self._plan_pytorch_action(state, cuda_for_wheels))
+        plan.actions.append(self._plan_triton_action(state, torch_version))
+        plan.actions.append(self._plan_sageattention_action(state, cuda_for_wheels, torch_version))
+
+        # Add custom nodes if requested
+        if self.with_custom_nodes:
+            for node in self.NODE_PRESETS.get("default", []):
+                plan.actions.append(ComponentAction(
+                    component=node["name"],
+                    action="INSTALL",
+                    target_version="latest",
+                    reason=node.get("description", "Custom node")
+                ))
+
+        # Check SA wheel availability for display
+        torch_ver_short = torch_version.split("+")[0] if torch_version else ""
+        compat = self.check_compatibility(
+            torch_ver=torch_ver_short,
+            cuda_ver=cuda_for_wheels
+        )
+        plan.sa_wheel_available = compat['compatible']
+        if compat['compatible'] and compat.get('match'):
+            plan.sa_wheel_url = compat['match'].get('wheel_url')
+
+        # Recommend backup if destructive changes planned
+        plan.backup_recommended = plan.has_destructive_changes()
+
+        # Add warnings
+        if not plan.sa_wheel_available:
+            cuda_display = self._format_cuda_version(cuda_for_wheels)
+            plan.warnings.append(
+                f"No SA 2.x wheel for CUDA {cuda_display} + PyTorch {torch_version or 'N/A'} + Python {state.python_version}. "
+                f"Will install SA 1.x fallback."
+            )
+
+        return plan
+
+    def _display_plan(self, plan: InstallPlan, show_footer: bool = True) -> None:
+        """Display the installation plan in a formatted way.
+
+        Args:
+            plan: The installation plan to display.
+            show_footer: Whether to print the closing footer with status message.
+                        Set to False if caller wants to add additional sections
+                        before the footer.
+        """
+        print()
+        print("=" * 70)
+        print("DRY RUN - Preview of Changes (no changes will be made)" if not hasattr(self, '_executing') else "Installation Plan")
+        print("=" * 70)
+
+        # Environment info
+        env_type_display = plan.current.environment_type.capitalize()
+        if plan.current.environment_type == "portable":
+            env_type_display = "Portable (python_embeded)"
+
+        print()
+        print("Current Environment:")
+        print(f"  Environment:   {env_type_display}")
+        print(f"  Python:        {plan.current.python_version}")
+        print(f"  PyTorch:       {plan.current.torch_version or '-'}")
+        print(f"  CUDA:          {self._format_cuda_version(plan.cuda_for_wheels)}")
+        print(f"  Triton:        {plan.current.triton_version or '-'}")
+        print(f"  SageAttention: {plan.current.sageattention_version or '-'}")
+
+        print()
+        print("-" * 70)
+        print("Proposed Changes:")
+        print("-" * 70)
+
+        for action in plan.actions:
+            if action.action == "KEEP":
+                detail = f"{action.current_version} (already installed)"
+            elif action.action == "INSTALL":
+                detail = action.target_version or "latest"
+            else:
+                detail = f"{action.current_version} -> {action.target_version}"
+                if action.reason:
+                    detail += f" ({action.reason})"
+
+            print(f"  {action.component:<15} [{action.action}]".ljust(35) + f" {detail}")
+
+        # Wheel details
+        print()
+        print("-" * 70)
+        print("Wheel Details:")
+        print("-" * 70)
+        if plan.sa_wheel_available:
+            print(f"  SageAttention wheel: {plan.sa_wheel_url}")
+        else:
+            print(f"  No SA 2.x wheel available for:")
+            print(f"    CUDA {self._format_cuda_version(plan.cuda_for_wheels)} + "
+                  f"PyTorch {plan.current.torch_version or '-'} + "
+                  f"Python {plan.current.python_version}")
+            print(f"  Will install: SA 1.0.6 from PyPI")
+
+        # Warnings
+        if plan.warnings:
+            print()
+            print("-" * 70)
+            print("Warnings:")
+            print("-" * 70)
+            for warning in plan.warnings:
+                print(f"  [!] {warning}")
+
+        # Backup recommendation
+        if plan.backup_recommended:
+            print()
+            print("-" * 70)
+            print("Backup Recommended:")
+            print("-" * 70)
+            print("  Significant changes planned. Consider using --backup before proceeding.")
+
+        # Footer with status message
+        if show_footer:
+            self._display_plan_footer(plan)
+
+    def _display_plan_footer(self, plan: InstallPlan) -> None:
+        """Display the closing footer for an installation plan.
+
+        This is separated from _display_plan() so callers can add additional
+        sections (like Triton compatibility) before the closing footer.
+        """
+        print()
+        print("=" * 70)
+        has_changes = plan.has_changes()
+        if not hasattr(self, '_executing'):
+            # Dryrun mode
+            if has_changes:
+                print("To execute these changes, run without --dryrun")
+            else:
+                print("Nothing to do - all components are already up to date")
+        print("=" * 70)
+
     def get_environment_info(self) -> Tuple[Dict[str, Dict[str, str]], str, str]:
         """Collect current environment information.
 
@@ -2037,177 +2584,55 @@ class ComfyUIInstaller:
             print(f"Triton/PyTorch:       [-] Triton not installed")
 
     def preview_changes(self) -> None:
-        """Preview what install/upgrade would do without making changes."""
-        # Collect all data first (this generates INFO logs from subprocess calls)
-        info, torch_ver, cuda_ver = self.get_environment_info()
-        compat = self.check_compatibility(torch_ver=torch_ver, cuda_ver=cuda_ver)
+        """Preview what install/upgrade would do without making changes.
 
-        current_sa = info["SageAttention"]["version"]
-        current_triton = info["Triton"]["version"]
-        current_torch = info["PyTorch"]["version"]
-        current_cuda = info["CUDA"]["version"]
-        current_python = info["Python"]["version"]
+        Uses plan_installation() as single source of truth to ensure dryrun
+        accurately predicts what install will do (Issue #18 fix).
+        """
+        # Generate the installation plan (single source of truth)
+        plan = self.plan_installation()
 
-        # Pre-check Triton update (generates INFO log, must be before formatted output)
-        triton_package = "triton-windows" if sys.platform == "win32" else "triton"
-        triton_has_update, triton_new_version = (False, None)
-        if current_triton != "-" and self.upgrade:
-            triton_has_update, triton_new_version = self._check_package_update_available(triton_package)
-
-        # Get Triton version constraint for PyTorch compatibility
-        triton_constraint = self._get_triton_version_constraint(torch_ver)
-
-        # Check Triton/PyTorch compatibility
-        triton_is_compat = True
-        triton_compat_msg = ""
-        if current_triton != "-":
-            triton_is_compat, triton_compat_msg = self._check_triton_pytorch_compatibility(
-                current_triton, torch_ver
-            )
-
-        # Determine target versions
-        if compat['compatible']:
-            target_sa = compat['match']['sage_version']
-            target_sa_type = "SA 2.x (~3x speedup)"
-            wheel_url = compat['match']['wheel_url']
-        else:
-            target_sa = "1.0.6"
-            target_sa_type = "SA 1.x (~2.1x speedup)"
-            wheel_url = "PyPI (pip install sageattention==1.0.6)"
-
-        # Now print clean output (all INFO logs are above this)
-        print()  # Blank line to separate from any INFO logs
-        print("=" * 70)
-        print("DRY RUN - Preview of Changes (no changes will be made)")
-        print("=" * 70)
-
-        # Get environment type for display
-        env_type_display = self.handler.environment_type.capitalize()
-        if self.handler.environment_type == "portable":
-            env_type_display = "Portable (python_embeded)"
-
-        print()
-        print("Current Environment:")
-        print(f"  Environment:   {env_type_display}")
-        print(f"  Python:        {current_python}")
-        print(f"  PyTorch:       {current_torch}")
-        print(f"  CUDA:          {current_cuda}")
-        print(f"  Triton:        {current_triton}")
-        print(f"  SageAttention: {current_sa}")
-
-        print()
-        print("-" * 70)
-        print("Proposed Changes:")
-        print("-" * 70)
-
-        # Show what would be installed/upgraded
-        changes = []
-
-        # PyTorch - use same logic as install path (_check_pytorch_compatibility)
-        # This ensures dryrun accurately predicts what install will do
-        if current_torch == "-":
-            changes.append(("PyTorch", "[INSTALL]", f"PyTorch with CUDA (auto-detected)"))
-        else:
-            # Check if install would keep or reinstall PyTorch
-            # Uses torch.version.cuda for wheel matching (not nvcc)
-            nvcc_cuda = self.handler.detect_cuda_version() or "cpu"
-            pytorch_compatible = self._check_pytorch_compatibility(nvcc_cuda)
-
-            if pytorch_compatible:
-                changes.append(("PyTorch", "[KEEP]", f"{current_torch} (already installed)"))
-            else:
-                # PyTorch needs upgrade (1.x -> 2.x, or CPU -> CUDA)
-                if not current_torch.startswith("2."):
-                    changes.append(("PyTorch", "[UPGRADE]", f"{current_torch} -> 2.x (version upgrade)"))
-                elif current_cuda == "CPU only" or current_cuda == "-":
-                    changes.append(("PyTorch", "[UPGRADE]", f"{current_torch} -> CUDA version"))
-                else:
-                    changes.append(("PyTorch", "[REINSTALL]", f"{current_torch} (compatibility fix)"))
-
-        # Triton - check compatibility first, then update availability
-        triton_constraint_desc = f" [constraint: {triton_constraint}]" if triton_constraint else ""
-        if current_triton == "-":
-            changes.append(("Triton", "[INSTALL]", f"{triton_package}{triton_constraint_desc}"))
-        elif not triton_is_compat:
-            # Incompatible Triton - will be fixed (uninstall + reinstall with constraint)
-            changes.append(("Triton", "[FIX]", f"{current_triton} -> compatible version{triton_constraint_desc}"))
-        else:
-            # Compatible Triton - check for updates if upgrading
-            if self.upgrade:
-                if triton_has_update:
-                    if triton_new_version:
-                        changes.append(("Triton", "[UPGRADE]", f"{current_triton} -> {triton_new_version}{triton_constraint_desc}"))
-                    else:
-                        changes.append(("Triton", "[UPGRADE]", f"{current_triton} -> (newer version available){triton_constraint_desc}"))
-                else:
-                    changes.append(("Triton", "[KEEP]", f"{current_triton} (compatible, up to date)"))
-            else:
-                changes.append(("Triton", "[KEEP]", f"{current_triton} (compatible)"))
-
-        # SageAttention
-        if current_sa == "-":
-            changes.append(("SageAttention", "[INSTALL]", f"{target_sa} - {target_sa_type}"))
-        elif self.upgrade:
-            # Check if installed version matches target
-            if self._sageattention_version_matches(current_sa, target_sa):
-                changes.append(("SageAttention", "[KEEP]", f"{current_sa} (already at target version)"))
-            else:
-                current_major = self._parse_sageattention_major_version(current_sa)
-                target_major = 2 if compat['compatible'] else 1
-                if current_major == target_major:
-                    changes.append(("SageAttention", "[UPGRADE]", f"{target_sa} - {target_sa_type}"))
-                else:
-                    changes.append(("SageAttention", "[UPGRADE]", f"{target_sa} - {target_sa_type} (version change!)"))
-        else:
-            changes.append(("SageAttention", "[KEEP]", f"{current_sa} (already installed)"))
-
-        # Custom nodes
+        # Add custom nodes to actions if requested (not part of core plan)
         if self.with_custom_nodes:
-            changes.append(("VideoHelperSuite", "[INSTALL]", "Custom node for video encoding"))
-            changes.append(("DazzleNodes", "[INSTALL]", "Custom node collection"))
+            plan.actions.append(ComponentAction(
+                component="VideoHelperSuite",
+                action="INSTALL",
+                target_version="latest",
+                reason="Custom node for video encoding"
+            ))
+            plan.actions.append(ComponentAction(
+                component="DazzleNodes",
+                action="INSTALL",
+                target_version="latest",
+                reason="Custom node collection"
+            ))
 
-        for component, action, detail in changes:
-            print(f"  {component:<15} {action:<10} {detail}")
+        # Display the plan (without footer - we add Triton compat section first)
+        self._display_plan(plan, show_footer=False)
 
-        # Check if there are any actual changes to make
-        has_changes = any(action in ("[INSTALL]", "[UPGRADE]", "[FIX]") for _, action, _ in changes)
+        # Additional: Show Triton/PyTorch compatibility details if Triton is installed
+        if plan.current.triton_version:
+            torch_ver = plan.current.torch_version
+            if torch_ver:
+                is_triton_compat, triton_compat_msg = self._check_triton_pytorch_compatibility(
+                    plan.current.triton_version, torch_ver
+                )
+                triton_package = "triton-windows" if sys.platform == "win32" else "triton"
+                triton_constraint = self._get_triton_version_constraint(torch_ver)
 
-        print()
-        print("-" * 70)
-        print("Wheel Details:")
-        print("-" * 70)
-        if compat['compatible']:
-            print(f"  SageAttention wheel: {wheel_url}")
-            if compat['match'].get('is_experimental'):
-                print(f"  [NOTE] This is an experimental wheel")
-        else:
-            print(f"  No SA 2.x wheel available for:")
-            print(f"    CUDA {current_cuda} + PyTorch {current_torch} + Python {current_python}")
-            print(f"  Will install: {wheel_url}")
+                print()
+                print("-" * 70)
+                print("Triton/PyTorch Compatibility:")
+                print("-" * 70)
+                if is_triton_compat:
+                    print(f"  [OK] {triton_compat_msg}")
+                else:
+                    print(f"  [WARNING] {triton_compat_msg}")
+                    print(f"  Fix: pip install \"{triton_package}{triton_constraint}\"")
+                    print(f"  This affects torch.compile (inductor backend)")
 
-        # Show Triton/PyTorch compatibility status
-        if current_triton != "-":
-            is_triton_compat, triton_compat_msg = self._check_triton_pytorch_compatibility(
-                current_triton, torch_ver
-            )
-            print()
-            print("-" * 70)
-            print("Triton/PyTorch Compatibility:")
-            print("-" * 70)
-            if is_triton_compat:
-                print(f"  [OK] {triton_compat_msg}")
-            else:
-                print(f"  [WARNING] {triton_compat_msg}")
-                print(f"  Fix: pip install \"{triton_package}{triton_constraint}\"")
-                print(f"  This affects torch.compile (inductor backend)")
-
-        print()
-        print("=" * 70)
-        if has_changes:
-            print("To execute these changes, run without --dryrun")
-        else:
-            print("Nothing to do - all components are already up to date")
-        print("=" * 70)
+        # Final status message (footer)
+        self._display_plan_footer(plan)
 
     def _parse_sageattention_major_version(self, version_str: str) -> Optional[int]:
         """Extract major version (1 or 2) from sageattention version string.
@@ -2758,12 +3183,50 @@ class ComfyUIInstaller:
     
     def install(self):
         """Run the complete installation process (matches Step 2 batch script)."""
+        # Mark that we're executing (affects display mode)
+        self._executing = True
+
+        # Generate the installation plan (single source of truth)
+        plan = self.plan_installation()
+
+        # Show plan summary before starting
+        print()
+        print("=" * 70)
+        print("Installation Plan")
+        print("=" * 70)
+        print()
+        has_changes = False
+        for action in plan.actions:
+            if action.action != "KEEP":
+                has_changes = True
+            status = f"[{action.action}]"
+            version_info = action.current_version or "not installed"
+            if action.target_version and action.action != "KEEP":
+                version_info = f"{version_info} -> {action.target_version}"
+            print(f"  {action.component:<15} {status:<12} {version_info}")
+        print()
+
+        # Warn about destructive changes
+        if plan.has_destructive_changes() and not self.force:
+            print("-" * 70)
+            print("WARNING: This installation includes changes that may affect your environment.")
+            if plan.backup_recommended:
+                print("Consider using --backup to create a backup before proceeding.")
+            print("-" * 70)
+            print()
+            if self.interactive:
+                response = input("Continue with installation? (Y/n): ")
+                if response.lower() == 'n':
+                    print("Installation cancelled.")
+                    return False
+            print()
+
         if self.force:
             print("FORCE MODE ENABLED")
             print("WARNING: --force will bypass all existing installation checks")
             print("This may:")
             print("   - Reinstall already working components")
-            print("   - Overwrite existing configurations") 
+            print("   - Overwrite existing configurations")
             print("   - Break working installations")
             print("   - Delete and re-clone repositories with uncommitted changes")
             print("   - Reinstall build tools and development packages")
