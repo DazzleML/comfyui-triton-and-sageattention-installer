@@ -36,9 +36,9 @@ Installing SageAttention on Windows has been notoriously difficult due to compil
 ### Quick Start
 
 ```bash
-python comfyui_triton_sageattention.py --install --with-custom-nodes
+python comfyui_triton_sageattention.py --install --with-custom-nodes --backup
 ```
-By default `comfyui_triton_sageattention.py` installs Triton and SageAttention 2 (falls back to 1 if unavailable). Add `--with-custom-nodes` to also install VideoHelperSuite and DazzleNodes.
+By default `comfyui_triton_sageattention.py` installs Triton and SageAttention 2 (falls back to 1 if unavailable). Add `--with-custom-nodes` to also install VideoHelperSuite and DazzleNodes. **Add `--backup` to automatically backup your environment first** - we recommend this in case you need to restore.
 
 ### Check Current Installation
 
@@ -117,6 +117,31 @@ python comfyui_triton_sageattention.py --upgrade
 ```
 
 For a full list of supported PyTorch/CUDA/Python combinations, see [docs/supported_wheels.md](docs/supported_wheels.md).
+
+### Environment Backup
+
+Before making significant changes, create a backup of your environment:
+
+```bash
+# Create a backup before upgrading
+python comfyui_triton_sageattention.py --backup
+
+# List available backups
+python comfyui_triton_sageattention.py --backup list
+
+# Restore from the most recent backup (by index)
+python comfyui_triton_sageattention.py --backup-restore 1
+
+# Clean up old backups (keep only the latest)
+python comfyui_triton_sageattention.py --backup-clean --keep-latest 1
+```
+
+Backups include:
+- Full copy of your `venv` or `python_embeded` folder
+- `requirements.txt` (pip freeze) for reference
+- `RESTORE.txt` with manual restore instructions
+
+**Safety**: Destructive operations (clean, restore) always require interactive confirmation and will refuse to run in non-interactive mode.
 
 ## Usage
 

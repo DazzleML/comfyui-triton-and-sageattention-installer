@@ -202,3 +202,121 @@ Or from any location:
 ```bash
 python comfyui_triton_sageattention.py --install --base-path C:\ComfyUI_windows_portable
 ```
+
+## Backup Options
+
+Environment backup feature for safe upgrades with full restore capability.
+
+### `--backup [create|list]`
+
+Backup management. Without argument defaults to `create`.
+
+| Value | Behavior |
+|-------|----------|
+| `create` | Create a timestamped backup of current environment (default) |
+| `list` | List all available backups with sizes and indices |
+
+```bash
+# Create a backup
+python comfyui_triton_sageattention.py --backup
+python comfyui_triton_sageattention.py --backup create
+
+# List available backups
+python comfyui_triton_sageattention.py --backup list
+```
+
+**Output example:**
+```
+Available backups:
+  [1] 20260105_143000  (3.2 GB)  venv
+  [2] 20260104_092315  (3.1 GB)  venv
+
+To restore: --backup-restore <index>  (e.g., --backup-restore 1)
+To clean:   --backup-clean [indices]  (e.g., --backup-clean 2 3)
+```
+
+### `--backup-restore INDEX_OR_TIMESTAMP`
+
+Restore environment from a backup. Accepts either:
+- Index number from `--backup list` (e.g., `1` for most recent)
+- Full timestamp (e.g., `20260105_143000`)
+
+```bash
+# Restore most recent backup
+python comfyui_triton_sageattention.py --backup-restore 1
+
+# Restore specific backup by timestamp
+python comfyui_triton_sageattention.py --backup-restore 20260105_143000
+```
+
+**Safety**: Always requires interactive confirmation. Will refuse to run in `--non-interactive` mode.
+
+### `--backup-clean [INDEX... | all]`
+
+Remove specific backups by index, or all backups with explicit `all` keyword.
+
+```bash
+# Show available backups and cleanup syntax (no action taken)
+python comfyui_triton_sageattention.py --backup-clean
+
+# Remove specific backups by index
+python comfyui_triton_sageattention.py --backup-clean 2 3
+
+# Remove ALL backups (requires explicit 'all' and confirmation)
+python comfyui_triton_sageattention.py --backup-clean all
+```
+
+**Safety**: Always requires interactive confirmation. Will refuse to run in `--non-interactive` mode.
+
+### `--keep-latest N`
+
+When cleaning backups, preserve the N most recent. Use with `--backup-clean`.
+
+```bash
+# Clean all but keep the latest 2 backups
+python comfyui_triton_sageattention.py --backup-clean all --keep-latest 2
+```
+
+### Combined with Install/Upgrade
+
+When `--backup` is combined with `--install` or `--upgrade`, the backup runs first:
+
+```bash
+# Backup first, then install (recommended!)
+python comfyui_triton_sageattention.py --install --backup
+
+# Backup first, then upgrade
+python comfyui_triton_sageattention.py --upgrade --backup
+```
+
+If the backup fails, the install/upgrade is aborted to protect your environment.
+
+### Backup Contents
+
+Each backup directory (`.comfyui_backups/{timestamp}/`) contains:
+
+| File | Description |
+|------|-------------|
+| `venv/` or `python_embeded/` | Full copy of environment folder |
+| `requirements.txt` | pip freeze output at backup time |
+| `RESTORE.txt` | Instructions for manual restore |
+
+### Backup Workflow Example
+
+```bash
+# Single command: backup and upgrade
+python comfyui_triton_sageattention.py --upgrade --backup
+
+# Or step by step:
+# 1. Before upgrading, create a backup
+python comfyui_triton_sageattention.py --backup
+
+# 2. Perform the upgrade
+python comfyui_triton_sageattention.py --upgrade
+
+# 3. If something breaks, restore
+python comfyui_triton_sageattention.py --backup-restore 1
+
+# 4. After confirming upgrade works, clean old backups
+python comfyui_triton_sageattention.py --backup-clean all --keep-latest 1
+```

@@ -12,6 +12,7 @@ Includes all functionality from:
 """
 
 import argparse
+from datetime import datetime
 import json
 import logging
 import os
@@ -29,7 +30,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 # Version information
-__version__ = "0.6.12"
+__version__ = "0.7.0"
 
 
 def parse_sage_version(version_str: str) -> Tuple[Optional[int], Optional[str]]:
@@ -207,6 +208,357 @@ class InstallPlan:
     def get_action(self, component: str) -> Optional[ComponentAction]:
         """Get the action for a specific component."""
         return next((a for a in self.actions if a.component == component), None)
+
+
+@dataclass
+class BackupInfo:
+    """Metadata for a single backup."""
+    timestamp: str
+    path: Path
+    size_bytes: int
+    env_type: str  # "venv" or "python_embeded"
+    index: int     # 1-based index for user selection
+
+    @property
+    def size_human(self) -> str:
+        """Return human-readable size string."""
+        size_mb = self.size_bytes / (1024 * 1024)
+        if size_mb >= 1024:
+            return f"{size_mb / 1024:.1f} GB"
+        return f"{size_mb:.1f} MB"
+
+
+class BackupManager:
+    """Manages environment backups for safe upgrades.
+
+    Backups are stored in .comfyui_backups/ with timestamped folders.
+    Each backup contains:
+    - Full copy of venv or python_embeded
+    - requirements.txt (pip freeze output)
+    - RESTORE.txt (instructions)
+
+    Usage:
+        manager = BackupManager(base_path, handler)
+        manager.create()           # Create new backup
+        manager.list_backups()     # List all backups
+        manager.restore("1")       # Restore by index
+        manager.clean([2, 3])      # Remove specific backups
+    """
+
+    def __init__(self, base_path: Path, handler: 'PlatformHandler', interactive: bool = True):
+        self.base_path = base_path
+        self.handler = handler
+        self.interactive = interactive
+        self.backup_root = base_path / ".comfyui_backups"
+
+    def create(self) -> Optional[Path]:
+        """Create timestamped backup of current environment.
+
+        Returns:
+            Path to backup directory, or None if backup failed.
+        """
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        backup_dir = self.backup_root / timestamp
+        backup_dir.mkdir(parents=True, exist_ok=True)
+
+        # Determine source based on environment type
+        if self.handler.environment_type == "portable":
+            src = self.base_path / "python_embeded"
+            env_type = "python_embeded"
+        else:
+            src = self.base_path / "venv"
+            env_type = "venv"
+
+        if not src.exists():
+            print(f"  [!] No environment found at {src}")
+            return None
+
+        print(f"\nCreating backup...")
+        print(f"  Source: {src}")
+
+        # Copy environment
+        dest = backup_dir / src.name
+        print(f"  Copying files... (this may take a few minutes)")
+        try:
+            shutil.copytree(src, dest, symlinks=True)
+        except Exception as e:
+            print(f"  [X] Failed to copy environment: {e}")
+            # Clean up partial backup
+            if backup_dir.exists():
+                shutil.rmtree(backup_dir, ignore_errors=True)
+            return None
+
+        # Save pip freeze for reference
+        print(f"  Saving pip freeze...")
+        pip_freeze = backup_dir / "requirements.txt"
+        try:
+            result = self.handler.run_command([
+                str(self.handler.python_path), "-m", "pip", "freeze"
+            ], capture_output=True)
+            if result.stdout:
+                pip_freeze.write_text(result.stdout)
+            else:
+                print(f"  [!] Warning: pip freeze returned no output")
+        except Exception as e:
+            # Non-fatal - backup is still useful without pip freeze
+            print(f"  [!] Warning: Could not save pip freeze: {e}")
+
+        # Write restore instructions
+        print(f"  Writing restore instructions...")
+        restore_txt = backup_dir / "RESTORE.txt"
+        restore_txt.write_text(f"""ComfyUI Environment Backup
+==========================
+Created: {timestamp}
+Source: {src}
+Type: {env_type}
+
+To restore this backup:
+  1. Stop ComfyUI if running
+  2. Rename or delete your current {src.name} folder
+  3. Copy {dest} back to {src}
+     OR run: python comfyui_triton_sageattention.py --backup-restore {timestamp}
+
+To restore just packages (keep current venv structure):
+  {self.handler.python_path} -m pip install -r "{pip_freeze}"
+
+To clean up this backup after successful install:
+  python comfyui_triton_sageattention.py --backup-clean
+""")
+
+        # Calculate and display size
+        size_bytes = self._get_dir_size(backup_dir)
+        size_human = self._format_size(size_bytes)
+        print(f"\n  [OK] Backup created: {backup_dir.relative_to(self.base_path)}/ ({size_human})")
+
+        return backup_dir
+
+    def list_backups(self) -> List[BackupInfo]:
+        """List available backups with metadata.
+
+        Returns:
+            List of BackupInfo objects, sorted newest first.
+        """
+        if not self.backup_root.exists():
+            return []
+
+        backups = []
+        for i, backup_path in enumerate(sorted(self.backup_root.iterdir(), reverse=True), 1):
+            if not backup_path.is_dir():
+                continue
+
+            # Determine environment type
+            if (backup_path / "python_embeded").exists():
+                env_type = "python_embeded"
+            elif (backup_path / "venv").exists():
+                env_type = "venv"
+            else:
+                env_type = "unknown"
+
+            backups.append(BackupInfo(
+                timestamp=backup_path.name,
+                path=backup_path,
+                size_bytes=self._get_dir_size(backup_path),
+                env_type=env_type,
+                index=i
+            ))
+
+        return backups
+
+    def print_backup_list(self) -> List[BackupInfo]:
+        """Print formatted list of backups and return the list."""
+        backups = self.list_backups()
+
+        if not backups:
+            print("\nNo backups found.")
+            print(f"  Backup location: {self.backup_root}")
+            return []
+
+        print(f"\nAvailable backups:")
+        for backup in backups:
+            print(f"  [{backup.index}] {backup.timestamp}  ({backup.size_human})  {backup.env_type}")
+
+        print(f"\nTo restore: --backup-restore <index>  (e.g., --backup-restore 1)")
+        print(f"To clean:   --backup-clean [indices]  (e.g., --backup-clean 2 3)")
+
+        return backups
+
+    def get_backup_by_identifier(self, identifier: str) -> Optional[BackupInfo]:
+        """Get backup by index (1-based) or timestamp.
+
+        Args:
+            identifier: Either an index like "1" or timestamp like "20260105_143000"
+
+        Returns:
+            BackupInfo if found, None otherwise.
+        """
+        backups = self.list_backups()
+
+        # Try as index first
+        try:
+            index = int(identifier)
+            if 1 <= index <= len(backups):
+                return backups[index - 1]
+        except ValueError:
+            pass
+
+        # Try as timestamp
+        for backup in backups:
+            if backup.timestamp == identifier:
+                return backup
+
+        return None
+
+    def restore(self, identifier: str) -> bool:
+        """Restore environment from backup.
+
+        Args:
+            identifier: Index (e.g., "1") or timestamp (e.g., "20260105_143000")
+
+        Returns:
+            True if restore succeeded, False otherwise.
+        """
+        backup = self.get_backup_by_identifier(identifier)
+        if not backup:
+            print(f"\n  [X] Backup not found: {identifier}")
+            print(f"      Use --backup list to see available backups.")
+            return False
+
+        # Determine source and destination
+        if backup.env_type == "python_embeded":
+            src = backup.path / "python_embeded"
+            dest = self.base_path / "python_embeded"
+        else:
+            src = backup.path / "venv"
+            dest = self.base_path / "venv"
+
+        if not src.exists():
+            print(f"\n  [X] Backup environment not found: {src}")
+            return False
+
+        print(f"\nRestoring from backup [{backup.index}] {backup.timestamp}")
+        print(f"  Source: {src}")
+        print(f"  Destination: {dest}")
+
+        # ALWAYS require confirmation for destructive operations
+        if dest.exists():
+            print(f"\n  WARNING: This will replace your current {dest.name} folder!")
+
+        if self.interactive:
+            response = input("  Type 'yes' to confirm: ").strip().lower()
+            if response != "yes":
+                print("  Restore cancelled.")
+                return False
+        else:
+            # Non-interactive mode - refuse to overwrite without explicit consent
+            print("\n  [!] Cannot restore in non-interactive mode.")
+            print("      Run without --non-interactive to confirm restore interactively.")
+            return False
+
+        # Remove existing and copy
+        try:
+            if dest.exists():
+                print(f"  Removing existing {dest.name}...")
+                shutil.rmtree(dest)
+
+            print(f"  Copying backup... (this may take a few minutes)")
+            shutil.copytree(src, dest, symlinks=True)
+
+            print(f"\n  [OK] Restore complete!")
+            return True
+        except Exception as e:
+            print(f"\n  [X] Restore failed: {e}")
+            return False
+
+    def clean(self, indices: Optional[List[int]] = None, keep_latest: int = 0) -> int:
+        """Remove backups.
+
+        Args:
+            indices: Specific backup indices to remove. If None, remove all.
+            keep_latest: When removing all, keep this many newest backups.
+
+        Returns:
+            Number of backups removed.
+        """
+        backups = self.list_backups()
+
+        if not backups:
+            print("\nNo backups to clean.")
+            return 0
+
+        # Determine which backups to remove
+        if indices:
+            # Remove specific indices
+            to_remove = []
+            for idx in indices:
+                if 1 <= idx <= len(backups):
+                    to_remove.append(backups[idx - 1])
+                else:
+                    print(f"  [!] Invalid index: {idx}")
+        else:
+            # Remove all (respecting keep_latest)
+            to_remove = backups[keep_latest:]
+
+        if not to_remove:
+            if keep_latest > 0:
+                print(f"\nNo backups to remove (keeping latest {keep_latest}).")
+            return 0
+
+        # Calculate total size
+        total_size = sum(b.size_bytes for b in to_remove)
+        total_size_human = self._format_size(total_size)
+
+        # Show what will be removed and confirm
+        print(f"\nBackups to remove:")
+        for backup in to_remove:
+            print(f"  [{backup.index}] {backup.timestamp}  ({backup.size_human})")
+
+        # ALWAYS require confirmation for destructive operations
+        if len(to_remove) == len(backups):
+            print(f"\n  WARNING: This will permanently delete ALL {len(to_remove)} backups ({total_size_human} total).")
+        else:
+            print(f"\n  This will delete {len(to_remove)} backup(s) ({total_size_human}).")
+
+        if self.interactive:
+            response = input("  Type 'yes' to confirm: ").strip().lower()
+            if response != "yes":
+                print("  Clean cancelled.")
+                return 0
+        else:
+            # Non-interactive mode - refuse to delete without explicit consent
+            print("\n  [!] Cannot delete backups in non-interactive mode.")
+            print("      Run without --non-interactive to confirm deletion interactively.")
+            return 0
+
+        # Remove backups
+        removed = 0
+        for backup in to_remove:
+            try:
+                print(f"  Removing [{backup.index}] {backup.timestamp}...")
+                shutil.rmtree(backup.path)
+                removed += 1
+            except Exception as e:
+                print(f"  [!] Failed to remove {backup.timestamp}: {e}")
+
+        print(f"\n  [OK] Removed {removed} backup(s), freed {total_size_human}")
+        return removed
+
+    def _get_dir_size(self, path: Path) -> int:
+        """Calculate total size of directory in bytes."""
+        total = 0
+        try:
+            for entry in path.rglob('*'):
+                if entry.is_file():
+                    total += entry.stat().st_size
+        except (OSError, PermissionError):
+            pass
+        return total
+
+    def _format_size(self, size_bytes: int) -> str:
+        """Format size in human-readable form."""
+        size_mb = size_bytes / (1024 * 1024)
+        if size_mb >= 1024:
+            return f"{size_mb / 1024:.1f} GB"
+        return f"{size_mb:.1f} MB"
 
 
 class ComfyUIInstallerError(Exception):
@@ -3643,6 +3995,37 @@ Examples:
         help="Preview what would be installed/upgraded without making changes"
     )
 
+    # Backup management arguments
+    parser.add_argument(
+        "--backup",
+        nargs="?",
+        const="create",
+        choices=["create", "list"],
+        metavar="ACTION",
+        help="Backup management: 'create' (default if no action), 'list' to show backups"
+    )
+
+    parser.add_argument(
+        "--backup-restore",
+        metavar="INDEX_OR_TIMESTAMP",
+        help="Restore from backup by index (e.g., '1') or timestamp (e.g., '20260105_143000')"
+    )
+
+    parser.add_argument(
+        "--backup-clean",
+        nargs="*",
+        metavar="INDEX",
+        help="Remove backups by index (e.g., '2 3'), or all if no indices given"
+    )
+
+    parser.add_argument(
+        "--keep-latest",
+        type=int,
+        default=0,
+        metavar="N",
+        help="When cleaning, keep N most recent backups (default: 0 = remove all specified)"
+    )
+
     parser.add_argument(
         "--version",
         action="version",
@@ -3659,7 +4042,11 @@ Examples:
     if args.dryrun and not (args.install or args.upgrade):
         parser.error("--dryrun requires --install or --upgrade")
 
-    if not (args.install or args.cleanup or args.run or args.upgrade or args.show_installed or args.dryrun):
+    # Check if any action was specified
+    has_backup_action = args.backup or args.backup_restore or args.backup_clean is not None
+    has_main_action = args.install or args.cleanup or args.run or args.upgrade or args.show_installed or args.dryrun
+
+    if not (has_main_action or has_backup_action):
         parser.print_help()
         return 1
 
@@ -3681,6 +4068,60 @@ Examples:
         with_custom_nodes=args.with_custom_nodes,
         python_specifier=python_specifier
     )
+
+    # Handle backup commands
+    if has_backup_action:
+        backup_manager = BackupManager(
+            base_path=args.base_path,
+            handler=installer.handler,
+            interactive=not args.non_interactive
+        )
+
+        # Standalone backup list - just display and exit
+        if args.backup == "list":
+            backup_manager.print_backup_list()
+            return 0
+
+        # Standalone backup restore - restore and exit
+        if args.backup_restore:
+            success = backup_manager.restore(args.backup_restore)
+            return 0 if success else 1
+
+        # Standalone backup clean - clean and exit
+        if args.backup_clean is not None:
+            # If no indices and no install/upgrade, show list and help
+            if not args.backup_clean and not (args.install or args.upgrade):
+                backups = backup_manager.print_backup_list()
+                if backups:
+                    print("\nTo clean specific backups: --backup-clean 1 2 3")
+                    print("To clean all backups:      --backup-clean all")
+                    print("To keep latest N:          --backup-clean --keep-latest N")
+                return 0
+
+            # Check for "all" keyword
+            indices = None
+            if args.backup_clean:
+                if args.backup_clean == ["all"]:
+                    indices = None  # Remove all
+                else:
+                    try:
+                        indices = [int(idx) for idx in args.backup_clean]
+                    except ValueError:
+                        parser.error("--backup-clean requires indices (e.g., 1 2 3) or 'all'")
+
+            backup_manager.clean(indices=indices, keep_latest=args.keep_latest)
+            return 0
+
+        # Backup create - if combined with install/upgrade, run backup first then continue
+        if args.backup == "create" or args.backup is not None:
+            result = backup_manager.create()
+            if not result:
+                print("\n[!] Backup failed. Aborting to protect your environment.")
+                return 1
+            # If no install/upgrade, we're done
+            if not (args.install or args.upgrade):
+                return 0
+            # Otherwise continue to install/upgrade below
 
     # Handle --show-installed (standalone action, exit after displaying)
     if args.show_installed:

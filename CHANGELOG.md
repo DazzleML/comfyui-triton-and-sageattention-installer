@@ -5,6 +5,26 @@ All notable changes to the ComfyUI Triton and SageAttention installer will be do
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-01-05
+
+### Added
+- **Environment backup feature** for safe upgrades with full restore capability
+- `BackupManager` class for modular backup management (preparation for future PyPI package)
+- `--backup [create|list]` flag for backup creation and listing
+- `--backup-restore <INDEX_OR_TIMESTAMP>` flag for environment restoration
+- `--backup-clean [INDEX...]` flag for removing specific backups
+- `--keep-latest N` flag to preserve recent backups during cleanup
+- Index-based backup selection (e.g., `--backup-restore 1` for most recent)
+- Automatic `requirements.txt` (pip freeze) saved with each backup
+- `RESTORE.txt` instructions included in each backup
+- Mandatory confirmation for all destructive operations (restore, clean)
+- Unit test suite for BackupManager (16 new tests, total 75 unit tests)
+
+### Changed
+- Destructive backup operations (clean, restore) require interactive confirmation
+- Non-interactive mode refuses destructive operations to prevent accidental data loss
+- Updated Quick Start documentation to recommend backup before install
+
 ## [0.6.12] - 2026-01-05
 
 ### Added
