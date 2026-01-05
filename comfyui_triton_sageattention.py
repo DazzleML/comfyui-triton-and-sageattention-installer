@@ -441,7 +441,8 @@ To clean up this backup after successful install:
 
         # ALWAYS require confirmation for destructive operations
         if dest.exists():
-            print(f"\n  WARNING: This will replace your current {dest.name} folder!")
+            print(f"\n  WARNING: This will PERMANENTLY DELETE your current {dest.name} folder!")
+            print(f"           Consider running --backup first if you haven't already.")
 
         if self.interactive:
             response = input("  Type 'yes' to confirm: ").strip().lower()
@@ -3064,16 +3065,16 @@ class ComfyUIInstaller:
 
         # Now print clean output (all INFO logs are above this)
         print()  # Blank line to separate from any INFO logs
-        print("=" * 62)
+        print("=" * 67)
         print("Current Installation")
-        print("=" * 62)
-        print(f"| {'Component':<15} | {'Version':<28} | {'Status':<9} |")
-        print("|" + "-" * 17 + "|" + "-" * 30 + "|" + "-" * 11 + "|")
+        print("=" * 67)
+        print(f"| {'Component':<15} | {'Version':<28} | {'Status':<14} |")
+        print("|" + "-" * 17 + "|" + "-" * 30 + "|" + "-" * 16 + "|")
         for component, data in info.items():
             version = data["version"]
             status = data["status"]
-            print(f"| {component:<15} | {version:<28} | {status:<9} |")
-        print("=" * 62)
+            print(f"| {component:<15} | {version:<28} | {status:<14} |")
+        print("=" * 67)
         print(f"{script_name} version: {__version__}")
         env_type_display = self.handler.environment_type.capitalize()
         if self.handler.environment_type == "portable":

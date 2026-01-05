@@ -38,7 +38,7 @@ Installing SageAttention on Windows has been notoriously difficult due to compil
 ```bash
 python comfyui_triton_sageattention.py --install --with-custom-nodes --backup
 ```
-By default `comfyui_triton_sageattention.py` installs Triton and SageAttention 2 (falls back to 1 if unavailable). Add `--with-custom-nodes` to also install VideoHelperSuite and DazzleNodes. **Add `--backup` to automatically backup your environment first** - we recommend this in case you need to restore.
+By default `comfyui_triton_sageattention.py` installs Triton and SageAttention 2 (falls back to 1 if unavailable). Add `--with-custom-nodes` to also install VideoHelperSuite and DazzleNodes. It's recommended to add `--backup` to automatically save your environment first, in case you want to later restore.
 
 ### Check Current Installation
 
@@ -120,7 +120,7 @@ For a full list of supported PyTorch/CUDA/Python combinations, see [docs/support
 
 ### Environment Backup
 
-Before making significant changes, create a backup of your environment:
+Before making changes, it's helpful to create a backup of your environment:
 
 ```bash
 # Create a backup before upgrading
