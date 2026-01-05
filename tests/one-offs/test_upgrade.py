@@ -131,7 +131,11 @@ def install_via_installer(sage_version: str):
 
 
 def run_upgrade(extra_args: list = None):
-    """Run the installer with --upgrade flag."""
+    """Run the installer with --upgrade flag.
+
+    Returns:
+        Tuple of (success: bool, output: str) - success status and full stdout
+    """
     args = extra_args or []
     cmd = [str(PYTHON_EXE), str(INSTALLER_PATH), "--upgrade"] + args + [
         "--base-path", str(COMFYUI_PATH),
@@ -147,18 +151,20 @@ def run_upgrade(extra_args: list = None):
         for line in result.stdout.split('\n'):
             if any(kw in line.lower() for kw in [
                 'upgrading', 'current version', 'removing', 'trying',
-                'successfully', 'error', 'failed', 'strategy', 'installed'
+                'successfully', 'error', 'failed', 'strategy', 'installed',
+                'not available', 'alternatives', 'suggestions', 'requires pytorch'
             ]):
                 print(line)
 
     if result.stderr:
         print(f"{Colors.RED}STDERR: {result.stderr}{Colors.END}")
 
-    return result.returncode == 0
+    return result.returncode == 0, result.stdout
 
 
 def run_test(test_num: int, description: str, setup_fn, upgrade_args: list,
-             expected_version_contains: str):
+             expected_version_contains: str, expect_failure: bool = False,
+             expected_error_contains: list = None):
     """
     Run a single test case.
 
@@ -167,7 +173,9 @@ def run_test(test_num: int, description: str, setup_fn, upgrade_args: list,
         description: Human-readable test description
         setup_fn: Function to call before upgrade (sets up initial state)
         upgrade_args: Additional arguments for --upgrade
-        expected_version_contains: String that should be in final version
+        expected_version_contains: String that should be in final version (if success expected)
+        expect_failure: If True, expect the install to fail with helpful error message
+        expected_error_contains: List of strings that should appear in error output
 
     Returns:
         bool: True if test passed
@@ -184,18 +192,41 @@ def run_test(test_num: int, description: str, setup_fn, upgrade_args: list,
     print(f"Before: {before_version or 'Not installed'}")
 
     # Run upgrade
-    success = run_upgrade(upgrade_args)
+    success, output = run_upgrade(upgrade_args)
 
     # Check result
     after_version = get_installed_version()
     print(f"After: {after_version or 'Not installed'}")
 
     passed = False
-    if after_version and expected_version_contains in after_version:
-        print(f"\n{Colors.GREEN}[PASS] Got version '{after_version}' (expected to contain '{expected_version_contains}'){Colors.END}")
-        passed = True
+
+    if expect_failure:
+        # We expect SA installation to fail (SA not installed), but with helpful error message
+        # Note: The installer may still return success code because it's designed to continue without SA
+        sa_not_installed = (after_version is None)
+
+        if sa_not_installed:
+            # Check that expected error messages are present
+            missing_msgs = []
+            if expected_error_contains:
+                for msg in expected_error_contains:
+                    if msg.lower() not in output.lower():
+                        missing_msgs.append(msg)
+
+            if not missing_msgs:
+                print(f"\n{Colors.GREEN}[PASS] SA installation failed as expected with helpful error message{Colors.END}")
+                passed = True
+            else:
+                print(f"\n{Colors.RED}[FAIL] SA not installed but missing expected messages: {missing_msgs}{Colors.END}")
+        else:
+            print(f"\n{Colors.RED}[FAIL] Expected SA to not be installed but got '{after_version}'{Colors.END}")
     else:
-        print(f"\n{Colors.RED}[FAIL] Expected version containing '{expected_version_contains}' but got '{after_version}'{Colors.END}")
+        # Normal case: expect success
+        if after_version and expected_version_contains in after_version:
+            print(f"\n{Colors.GREEN}[PASS] Got version '{after_version}' (expected to contain '{expected_version_contains}'){Colors.END}")
+            passed = True
+        else:
+            print(f"\n{Colors.RED}[FAIL] Expected version containing '{expected_version_contains}' but got '{after_version}'{Colors.END}")
 
     return passed
 
@@ -228,54 +259,87 @@ def main():
     print(f"Detected PyTorch version: {torch_ver}")
 
     # Build test matrix with compatibility awareness
-    # (test_num, description, setup_fn, upgrade_args, expected_version_contains, required_sa_version)
+    # Each test: (test_num, description, setup_fn, upgrade_args, expected_version_contains,
+    #             requires_sa_for_setup, test_error_behavior)
+    # test_error_behavior: None = normal test, "error_message" = test error handling on incompatible env
     all_tests = [
         # Test 1: Primary use case - upgrade from SA 1.0.6 to SA 2.x
         (1, "Upgrade from SA 1.0.6 to SA 2.x (primary use case)",
          lambda: (uninstall_sageattention(), install_specific_version("1.0.6")),
          [],  # Just --upgrade, no other args
          "2.2.0",  # Should get latest SA2
-         None),  # No specific SA version required
+         None,     # No specific SA version required for setup
+         None),    # Normal test behavior
 
-        # Test 2: Upgrade with explicit --sage-version 2.1.1
-        # Note: SA 2.1.1 only has wheels for PyTorch <= 2.8
-        (2, "Upgrade with --sage-version 2.1.1",
+        # Test 2: Request --sage-version 2.1.1
+        # On PyTorch <= 2.8: succeeds, installs 2.1.1
+        # On PyTorch 2.9+: fails with helpful error message
+        (2, "Request --sage-version 2.1.1 (error handling test on PyTorch 2.9+)",
          lambda: uninstall_sageattention(),
          ["--sage-version", "2.1.1"],
          "2.1.1",
-         "2.1.1"),  # Requires SA 2.1.1 compatibility
+         None,             # No setup dependency
+         "error_message"), # Test error message behavior if incompatible
 
         # Test 3: Upgrade when nothing installed (should just install)
         (3, "Upgrade with no existing installation",
          lambda: uninstall_sageattention(),
          [],
          "2.2.0",  # Should install latest SA2
+         None,
          None),
 
         # Test 4: Upgrade within SA2 (2.1.x to 2.2.x)
-        # Note: SA 2.1.1 only has wheels for PyTorch <= 2.8
+        # Note: SA 2.1.1 only has wheels for PyTorch <= 2.8, so can't test setup on 2.9+
         (4, "Upgrade from SA 2.1.1 to SA 2.2.x",
          lambda: (uninstall_sageattention(), install_via_installer("2.1.1")),
          [],  # Just --upgrade, should go to latest
          "2.2.0",  # Should upgrade to 2.2.0.post3
-         "2.1.1"),  # Requires SA 2.1.1 for setup
+         "2.1.1",  # Requires SA 2.1.1 for setup (skip if not compatible)
+         None),
     ]
 
     results = []
 
-    for test_num, description, setup_fn, upgrade_args, expected, required_sa in all_tests:
+    for test_num, description, setup_fn, upgrade_args, expected, requires_sa_for_setup, test_error_behavior in all_tests:
         if args.test is not None and args.test != test_num:
             continue
 
-        # Check if this test requires an SA version that's not compatible
-        if required_sa and torch_ver and not is_sa_version_compatible(required_sa, torch_ver):
+        # Check if this test requires an SA version for SETUP that's not compatible
+        # (e.g., Test 4 needs to install SA 2.1.1 first, which isn't possible on PyTorch 2.9+)
+        if requires_sa_for_setup and torch_ver and not is_sa_version_compatible(requires_sa_for_setup, torch_ver):
             print(f"\n{Colors.BOLD}{'='*70}{Colors.END}")
             print(f"{Colors.YELLOW}TEST {test_num}: {description}{Colors.END}")
             print('='*70)
-            print(f"{Colors.YELLOW}[SKIP] SA {required_sa} not compatible with PyTorch {torch_ver}{Colors.END}")
+            print(f"{Colors.YELLOW}[SKIP] Test setup requires SA {requires_sa_for_setup} which isn't compatible with PyTorch {torch_ver}{Colors.END}")
             print(f"       SA 2.1.1 requires PyTorch <= 2.8 (you have {torch_ver})")
             results.append((test_num, description, None))  # None = skipped
             continue
+
+        # Check if this test should verify error message behavior on incompatible env
+        if test_error_behavior == "error_message":
+            # Determine if SA version is compatible with current PyTorch
+            requested_sa = None
+            for i, arg in enumerate(upgrade_args):
+                if arg == "--sage-version" and i + 1 < len(upgrade_args):
+                    requested_sa = upgrade_args[i + 1]
+                    break
+
+            if requested_sa and torch_ver and not is_sa_version_compatible(requested_sa, torch_ver):
+                # RUN THE TEST to verify error message - don't skip!
+                description_mod = f"{description}"
+                passed = run_test(
+                    test_num, description_mod, setup_fn, upgrade_args, expected,
+                    expect_failure=True,
+                    expected_error_contains=[
+                        "not available",
+                        "alternatives",
+                        "requires pytorch",
+                    ]
+                )
+                results.append((test_num, description, passed))
+                continue
+            # else: SA is compatible, run as normal success test
 
         passed = run_test(test_num, description, setup_fn, upgrade_args, expected)
         results.append((test_num, description, passed))

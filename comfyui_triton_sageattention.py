@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 # Version information
-__version__ = "0.6.11"
+__version__ = "0.6.12"
 
 
 def parse_sage_version(version_str: str) -> Tuple[Optional[int], Optional[str]]:
@@ -2001,6 +2001,148 @@ class ComfyUIInstaller:
 
         return None
 
+    def _get_available_sa2_versions(self, cuda_ver: str, torch_ver: str, python_ver: str,
+                                     include_experimental: bool = False) -> Dict[str, Dict]:
+        """Get all available SA2 versions for the current environment.
+
+        Args:
+            cuda_ver: CUDA version code (e.g., "128")
+            torch_ver: PyTorch version (e.g., "2.9.1")
+            python_ver: Python version code (e.g., "312")
+            include_experimental: Include experimental wheels
+
+        Returns:
+            Dict mapping SA version to availability info:
+            {
+                "2.2.0.post3": {"compatible": True, "is_abi3": True},
+                "2.1.1": {"compatible": False, "reason": "Requires PyTorch 2.5-2.8", "pytorch_range": "2.5-2.8"},
+            }
+        """
+        if platform.system() != "Windows":
+            return {}
+
+        wheel_configs = self._get_wheel_configs()
+        torch_parts = torch_ver.split(".")
+        torch_major_minor = f"{torch_parts[0]}.{torch_parts[1]}" if len(torch_parts) >= 2 else torch_ver
+        py_int = int(python_ver)
+
+        # Collect info about each SA version
+        version_info = {}
+
+        for sage_ver, cuda_whl, torch_pattern, py_spec, tag, is_abi3, is_experimental, torch_filename_ver in wheel_configs:
+            if is_experimental and not include_experimental:
+                continue
+
+            # Track base version (e.g., "2.2.0" from "2.2.0.post3")
+            base_ver = sage_ver.split(".post")[0] if ".post" in sage_ver else sage_ver
+
+            if sage_ver not in version_info:
+                version_info[sage_ver] = {
+                    "compatible": False,
+                    "is_abi3": is_abi3,
+                    "pytorch_patterns": set(),
+                    "cuda_versions": set(),
+                }
+
+            version_info[sage_ver]["pytorch_patterns"].add(torch_pattern)
+            version_info[sage_ver]["cuda_versions"].add(cuda_whl)
+
+            # Check if this specific config matches
+            cuda_ok = (cuda_whl == cuda_ver)
+            torch_ok = False
+            if "." in torch_pattern and torch_pattern.count(".") == 2:
+                torch_ok = (torch_ver == torch_pattern)
+            else:
+                torch_ok = (torch_major_minor == torch_pattern)
+
+            python_ok = False
+            if is_abi3:
+                python_ok = (py_int >= 39)
+            else:
+                python_ok = (py_spec == python_ver)
+
+            if cuda_ok and torch_ok and python_ok:
+                version_info[sage_ver]["compatible"] = True
+
+        # Add human-readable info
+        for ver, info in version_info.items():
+            patterns = sorted(info["pytorch_patterns"])
+            if not info["compatible"]:
+                # Generate reason
+                if patterns:
+                    min_pt = patterns[0]
+                    max_pt = patterns[-1]
+                    if min_pt == max_pt:
+                        info["reason"] = f"Only available for PyTorch {min_pt}.x"
+                        info["pytorch_range"] = f"{min_pt}.x"
+                    else:
+                        info["reason"] = f"Requires PyTorch {min_pt}-{max_pt}"
+                        info["pytorch_range"] = f"{min_pt}-{max_pt}"
+                else:
+                    info["reason"] = "No wheels available"
+
+            # Clean up sets for return value
+            info["pytorch_patterns"] = list(info["pytorch_patterns"])
+            info["cuda_versions"] = list(info["cuda_versions"])
+
+        return version_info
+
+    def _check_exact_version_availability(self, exact_version: str) -> Tuple[bool, str, List[str]]:
+        """Pre-check if an exact SA version is available for current environment.
+
+        Args:
+            exact_version: The exact version requested (e.g., "2.1.1")
+
+        Returns:
+            Tuple of (is_available, reason_if_not, list_of_alternatives)
+        """
+        try:
+            torch_ver = self._get_torch_version()
+            cuda_ver = self._get_cuda_version_from_torch()
+            python_ver = f"{sys.version_info.major}{sys.version_info.minor}"
+        except Exception as e:
+            self.logger.debug(f"Could not detect environment: {e}")
+            return True, "", []  # Can't check, let install attempt proceed
+
+        available_versions = self._get_available_sa2_versions(
+            cuda_ver, torch_ver, python_ver,
+            include_experimental=self.experimental
+        )
+
+        # Check if exact version is available
+        for ver, info in available_versions.items():
+            if ver.startswith(exact_version) and info["compatible"]:
+                return True, "", []
+
+        # Not available - generate helpful message
+        torch_parts = torch_ver.split(".")
+        torch_major_minor = f"{torch_parts[0]}.{torch_parts[1]}" if len(torch_parts) >= 2 else torch_ver
+
+        # Find reason for the requested version
+        reason = ""
+        for ver, info in available_versions.items():
+            if ver.startswith(exact_version):
+                pt_range = info.get("pytorch_range", "unknown")
+                reason = f"SA {exact_version} requires PyTorch {pt_range} (you have {torch_major_minor})"
+                break
+
+        if not reason:
+            reason = f"SA {exact_version} has no pre-built wheels for CUDA {cuda_ver}"
+
+        # Find alternatives
+        alternatives = []
+        for ver, info in sorted(available_versions.items(), reverse=True):
+            if info["compatible"]:
+                if info["is_abi3"]:
+                    alternatives.append(f"SA {ver} (recommended, ABI3 wheel)")
+                else:
+                    alternatives.append(f"SA {ver}")
+
+        # Always mention SA1 as fallback
+        alternatives.append("SA 1.0.6 (from PyPI, always available)")
+
+        return False, reason, alternatives
+
     def check_compatibility(self, torch_ver: Optional[str] = None,
                             cuda_ver: Optional[str] = None) -> Dict[str, Any]:
         """Check if current environment is compatible with SA 2.x.
@@ -2913,6 +3055,33 @@ class ComfyUIInstaller:
         self.logger.error("SageAttention 2.x installation failed - no compatible wheel")
         raise ComfyUIInstallerError("SageAttention 2.x not available for this configuration")
 
+    def _fail_exact_version_unavailable(self, version: str, reason: str, alternatives: List[str]):
+        """Print failure message when exact SA version requested but not available.
+
+        Args:
+            version: The exact version that was requested
+            reason: Human-readable explanation of why it's unavailable
+            alternatives: List of available alternative versions
+        """
+        print()
+        print("  " + "-" * 50)
+        print(f"  [X] SageAttention {version} is not available for your configuration")
+        print()
+        print(f"      {reason}")
+        print()
+        if alternatives:
+            print("      Available alternatives:")
+            for alt in alternatives:
+                print(f"        - {alt}")
+            print()
+        print("      Suggestions:")
+        print("        - Use --sage-version 2 to install the latest compatible SA2")
+        print("        - Use --sage-version auto to get the best available version")
+        print("  " + "-" * 50)
+
+        self.logger.error(f"SageAttention {version} not available: {reason}")
+        raise ComfyUIInstallerError(f"SageAttention {version} not available for this configuration")
+
     def clone_and_install_repositories(self):
         """Clone and install required repositories."""
         sage_failed = False
@@ -2965,6 +3134,12 @@ class ComfyUIInstaller:
             elif major == 2:
                 # SA2 requested (either "2" or "2.1.1")
                 if exact:
+                    # Pre-check: Is this exact version available for the environment?
+                    available, reason, alternatives = self._check_exact_version_availability(exact)
+                    if not available:
+                        self._fail_exact_version_unavailable(exact, reason, alternatives)
+                        # Note: _fail_exact_version_unavailable raises, so we don't continue
+
                     print(f"  Strategy: Install exact version {exact}")
                 else:
                     print("  Strategy: Install any compatible SA2")
@@ -3314,10 +3489,10 @@ class ComfyUIInstaller:
             try:
                 self.clone_and_install_repositories()
             except ComfyUIInstallerError as e:
-                if "Failed to install SageAttention" in str(e):
+                if "SageAttention" in str(e):
                     sage_attention_failed = True
                     print("\nWARNING: SageAttention installation failed!")
-                    print("This is a known issue on Windows with CUDA compilation.")
+                    print("Check the error message above for details.")
                     print("The rest of ComfyUI will still work, but without SageAttention acceleration.")
                     
                     if self.interactive:
@@ -3334,7 +3509,7 @@ class ComfyUIInstaller:
             
             if sage_attention_failed:
                 print("\nWARNING: Installation completed with warnings!")
-                print("WARNING: SageAttention could not be installed due to compilation issues.")
+                print("WARNING: SageAttention could not be installed. See error details above.")
                 print("WARNING: You can try installing it manually later or use ComfyUI without it.")
             else:
                 print("\nSuccess!")
