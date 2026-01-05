@@ -694,5 +694,117 @@ class TestUpgradeMode:
             f"Compatible Triton without --upgrade should be KEEP, got {triton_action.action}"
 
 
+# =============================================================================
+# CPU->CUDA SWITCH EXECUTION TESTS (Issue #23)
+# =============================================================================
+
+class TestCpuToCudaSwitch:
+    """Test that install_pytorch() correctly handles CPU->CUDA switch.
+
+    Issue #23: When plan says UPGRADE with "CPU-only" reason,
+    install_pytorch() must uninstall first because pip won't replace
+    torch+cpu with torch+cuda when version constraint is satisfied.
+    """
+
+    def test_cpu_to_cuda_triggers_uninstall(self, mock_installer):
+        """CPU->CUDA upgrade should uninstall torch before installing."""
+        # Setup: CPU-only PyTorch with CUDA available
+        setup_full_mock(
+            mock_installer,
+            torch_version="2.9.1",  # No +cu suffix = CPU-only
+            torch_cuda=None,
+            nvcc_cuda="12.8"
+        )
+
+        # Generate plan - should show UPGRADE
+        plan = mock_installer.plan_installation()
+        pytorch_action = plan.get_action("PyTorch")
+
+        assert pytorch_action.action == "UPGRADE", \
+            f"CPU->CUDA should be UPGRADE, got {pytorch_action.action}"
+        assert "CPU-only" in pytorch_action.reason, \
+            f"Reason should mention 'CPU-only', got: {pytorch_action.reason}"
+
+        # Store the plan so install_pytorch can access it
+        mock_installer._current_plan = plan
+
+        # Track if uninstall was called
+        uninstall_called = False
+        original_run_command = mock_installer.handler.run_command
+
+        def mock_run_command(cmd, **kwargs):
+            nonlocal uninstall_called
+            if isinstance(cmd, list) and "uninstall" in cmd:
+                uninstall_called = True
+                # Return success
+                result = Mock()
+                result.returncode = 0
+                result.stdout = ""
+                return result
+            return original_run_command(cmd, **kwargs)
+
+        mock_installer.handler.run_command = mock_run_command
+
+        # Call install_pytorch
+        mock_installer.install_pytorch("12.8")
+
+        assert uninstall_called, \
+            "CPU->CUDA switch should call pip uninstall before installing"
+
+    def test_cuda_to_cuda_no_uninstall(self, mock_installer):
+        """CUDA->CUDA (same version) should NOT uninstall."""
+        # Setup: Already has CUDA PyTorch
+        setup_full_mock(
+            mock_installer,
+            torch_version="2.9.1+cu128",
+            torch_cuda="12.8",
+            nvcc_cuda="12.8"
+        )
+
+        # Generate plan - should show KEEP
+        plan = mock_installer.plan_installation()
+        pytorch_action = plan.get_action("PyTorch")
+
+        assert pytorch_action.action == "KEEP", \
+            f"CUDA PyTorch should be KEEP, got {pytorch_action.action}"
+
+        # Store the plan
+        mock_installer._current_plan = plan
+
+        # Track calls
+        uninstall_called = False
+        original_run_command = mock_installer.handler.run_command
+
+        def mock_run_command(cmd, **kwargs):
+            nonlocal uninstall_called
+            if isinstance(cmd, list) and "uninstall" in cmd:
+                uninstall_called = True
+            return original_run_command(cmd, **kwargs)
+
+        mock_installer.handler.run_command = mock_run_command
+
+        # Call install_pytorch
+        mock_installer.install_pytorch("12.8")
+
+        assert not uninstall_called, \
+            "KEEP action should not call uninstall"
+
+    def test_plan_reason_contains_cpu_only(self, mock_installer):
+        """Verify plan reason format for CPU->CUDA detection."""
+        setup_full_mock(
+            mock_installer,
+            torch_version="2.7.0",  # CPU-only
+            torch_cuda=None,
+            nvcc_cuda="12.8"
+        )
+
+        plan = mock_installer.plan_installation()
+        pytorch_action = plan.get_action("PyTorch")
+
+        # The exact reason text that install_pytorch() checks for
+        assert "CPU-only" in pytorch_action.reason, \
+            f"Reason must contain 'CPU-only' for uninstall detection. Got: {pytorch_action.reason}"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

@@ -177,6 +177,8 @@ python comfyui_triton_sageattention.py --show-installed
 python comfyui_triton_sageattention.py --upgrade
 ```
 
+**Note**: When upgrading from CPU-only to CUDA-enabled PyTorch, the installer automatically uninstalls the existing torch packages first. This is necessary because pip won't replace CPU builds with CUDA builds when version constraints are already satisfied.
+
 ### Clean Slate Reinstall
 
 ```bash

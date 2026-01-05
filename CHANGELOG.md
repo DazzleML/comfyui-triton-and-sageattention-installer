@@ -5,7 +5,23 @@ All notable changes to the ComfyUI Triton and SageAttention installer will be do
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.7.0](https://github.com/djdarcy/comfyui-triton-and-sageattention-installer/compare/1672dd0...v0.7.0) - 2026-01-05
+## [0.7.1](https://github.com/djdarcy/comfyui-triton-and-sageattention-installer/compare/a924cfc...v0.7.1) - 2026-01-05
+
+### Fixed
+- **CPU→CUDA PyTorch upgrade now works correctly** (Issue #23)
+  - `install_pytorch()` now uses InstallPlan as single source of truth
+  - Uninstalls CPU-only torch before installing CUDA version
+  - Fixes pip "Requirement already satisfied" ignoring CPU→CUDA switch
+
+### Changed
+- Installation methods now respect the InstallPlan instead of making independent decisions
+- Improved architecture alignment between dryrun preview and actual installation
+
+### Added
+- 3 new unit tests for CPU→CUDA switch behavior (78 total)
+- Documentation for Issue #22 GPU detection integration points
+
+## [0.7.0](https://github.com/djdarcy/comfyui-triton-and-sageattention-installer/compare/1672dd0...a924cfc) - 2026-01-05
 
 ### Added
 - **Environment backup feature** for safe upgrades with full restore capability

@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 # Version information
-__version__ = "0.7.0"
+__version__ = "0.7.1"
 
 
 def parse_sage_version(version_str: str) -> Tuple[Optional[int], Optional[str]]:
@@ -124,6 +124,14 @@ class EnvironmentState:
 
     Captures all relevant version and configuration information
     needed to make installation decisions.
+
+    Future (Issue #22 - GPU Detection):
+        gpu_name: Optional[str]           # e.g., "NVIDIA GeForce RTX 5090"
+        driver_version: Optional[str]     # e.g., "572.16"
+        max_supported_cuda: Optional[str] # Derived from driver, e.g., "13.0"
+
+    These would enable _plan_pytorch_action() to recommend specific
+    PyTorch+CUDA versions based on detected hardware.
     """
     # PyTorch state
     torch_version: Optional[str] = None       # e.g., "2.9.1+cu130" or None
@@ -1805,22 +1813,60 @@ class ComfyUIInstaller:
     def install_pytorch(self, cuda_version: str):
         """Install PyTorch with appropriate CUDA support.
 
-        Only installs if PyTorch is missing, incompatible, or --force specified.
-        Does NOT pin a specific version - lets pip resolve the latest compatible.
-        """
-        # Check if compatible PyTorch is already installed
-        if not self.force and self._check_pytorch_compatibility(cuda_version):
-            print("Compatible PyTorch already installed")
-            return
+        Uses the InstallPlan as single source of truth for what action to take.
+        This ensures dryrun and install behave identically.
 
-        if self.force and self._check_pytorch_compatibility(cuda_version):
-            print("WARNING: Compatible PyTorch already installed but --force specified")
-            print("This will reinstall PyTorch and may break existing installations")
-            if self.interactive:
-                response = input("Continue with forced PyTorch installation? (y/N): ")
-                if response.lower() != 'y':
-                    print("Skipping PyTorch installation")
-                    return
+        Actions:
+        - KEEP: Skip installation (compatible PyTorch already installed)
+        - INSTALL: Fresh installation (no PyTorch present)
+        - UPGRADE: Upgrade existing PyTorch (version or CPU->CUDA switch)
+        - REINSTALL: Force reinstall (--force flag)
+        """
+        # Get the planned action from InstallPlan (single source of truth)
+        action = None
+        if hasattr(self, '_current_plan') and self._current_plan:
+            action = self._current_plan.get_action("PyTorch")
+
+        # Use plan action if available, otherwise fall back to compatibility check
+        if action:
+            if action.action == "KEEP":
+                print(f"Compatible PyTorch already installed ({action.current_version})")
+                return
+
+            if action.action == "REINSTALL":
+                print("WARNING: Compatible PyTorch already installed but --force specified")
+                print("This will reinstall PyTorch and may break existing installations")
+                if self.interactive:
+                    response = input("Continue with forced PyTorch installation? (y/N): ")
+                    if response.lower() != 'y':
+                        print("Skipping PyTorch installation")
+                        return
+
+            # Handle CPU->CUDA switch: need to uninstall first because pip won't
+            # replace torch+cpu with torch+cuda when version constraint is satisfied
+            if action.action == "UPGRADE" and "CPU-only" in action.reason:
+                print("Switching PyTorch from CPU to CUDA...")
+                print("  Removing existing CPU-only installation first...")
+                # Uninstall torch stack - pip won't switch CPU->CUDA otherwise
+                self.handler.run_command([
+                    str(self.handler.python_path), "-m", "pip", "uninstall", "-y",
+                    "torch", "torchvision", "torchaudio"
+                ], check=False)  # Don't fail if some packages not installed
+
+        else:
+            # Fallback for when called without a plan (shouldn't happen in normal flow)
+            if not self.force and self._check_pytorch_compatibility(cuda_version):
+                print("Compatible PyTorch already installed")
+                return
+
+            if self.force and self._check_pytorch_compatibility(cuda_version):
+                print("WARNING: Compatible PyTorch already installed but --force specified")
+                print("This will reinstall PyTorch and may break existing installations")
+                if self.interactive:
+                    response = input("Continue with forced PyTorch installation? (y/N): ")
+                    if response.lower() != 'y':
+                        print("Skipping PyTorch installation")
+                        return
 
         print("Installing PyTorch...")
 
@@ -3743,7 +3789,9 @@ class ComfyUIInstaller:
         self._executing = True
 
         # Generate the installation plan (single source of truth)
-        plan = self.plan_installation()
+        # Store as instance variable so install methods can access it
+        self._current_plan = self.plan_installation()
+        plan = self._current_plan  # Local alias for display code below
 
         # Show plan summary before starting
         print()
