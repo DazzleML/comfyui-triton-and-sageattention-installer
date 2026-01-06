@@ -5,6 +5,15 @@ All notable changes to the ComfyUI Triton and SageAttention installer will be do
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.2] - 2026-01-05
+
+### Fixed
+- `--backup-clean` help text now correctly states `'all'` keyword is required (not implicit)
+
+### Changed
+- Moved `--upgrade` to appear right after `--install` in help output for discoverability
+- Added `--upgrade --base-path` example to help epilog
+
 ## [0.7.1](https://github.com/djdarcy/comfyui-triton-and-sageattention-installer/compare/a924cfc...v0.7.1) - 2026-01-05
 
 ### Fixed

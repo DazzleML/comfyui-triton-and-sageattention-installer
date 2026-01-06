@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 # Version information
-__version__ = "0.7.1"
+__version__ = "0.7.2"
 
 
 def parse_sage_version(version_str: str) -> Tuple[Optional[int], Optional[str]]:
@@ -3939,6 +3939,7 @@ Examples:
   %(prog)s --install --verbose          # Install with verbose output
   %(prog)s --install --force            # Force reinstall all components (original script behavior)
   %(prog)s --install --base-path /opt/comfyui  # Install to specific directory
+  %(prog)s --upgrade --base-path /opt/comfyui  # Upgrade existing installation
   %(prog)s --install --non-interactive --force  # Automated forced install (CI/Docker)
         """
     )
@@ -3948,7 +3949,15 @@ Examples:
         action="store_true",
         help="Run the installation process (equivalent to Step 2 batch script)"
     )
-    
+
+    parser.add_argument(
+        "--upgrade",
+        action="store_true",
+        help="Upgrade existing SageAttention installation to latest compatible version. "
+             "Removes current installation before reinstalling. "
+             "Use with --sage-version for explicit target, or --experimental for prerelease versions."
+    )
+
     parser.add_argument(
         "--cleanup",
         action="store_true", 
@@ -4018,14 +4027,6 @@ Examples:
     )
 
     parser.add_argument(
-        "--upgrade",
-        action="store_true",
-        help="Upgrade existing SageAttention installation to latest compatible version. "
-             "Removes current installation before reinstalling. "
-             "Use with --sage-version for explicit target, or --experimental for prerelease versions."
-    )
-
-    parser.add_argument(
         "--with-custom-nodes",
         action="store_true",
         help="Install recommended custom nodes (VideoHelperSuite, DazzleNodes). "
@@ -4064,7 +4065,7 @@ Examples:
         "--backup-clean",
         nargs="*",
         metavar="INDEX",
-        help="Remove backups by index (e.g., '2 3'), or all if no indices given"
+        help="Remove backups by index (e.g., '2 3'), or 'all' to remove all backups"
     )
 
     parser.add_argument(
