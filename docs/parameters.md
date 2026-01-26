@@ -35,7 +35,7 @@ Control which Python environment to use. Default: `auto`.
 
 | Value | Behavior |
 |-------|----------|
-| `auto` | Auto-detect: portable > venv > system (default) |
+| `auto` | Auto-detect: portable > .venv > venv > system (default) |
 | `system` | Use system Python directly, no venv |
 | `portable` | Require ComfyUI Portable's `python_embeded` (Windows only, error if not found) |
 | `venv` | Use/create venv at `--base-path`, skip portable even if exists |

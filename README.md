@@ -38,7 +38,10 @@ Installing SageAttention on Windows has been notoriously difficult due to compil
 ```bash
 python comfyui_triton_sageattention.py --install --with-custom-nodes --backup
 ```
-By default `comfyui_triton_sageattention.py` installs Triton and SageAttention 2 (falls back to 1 if unavailable). Add `--with-custom-nodes` to also install VideoHelperSuite and DazzleNodes. It's recommended to add `--backup` to automatically save your environment first, in case you want to restore later.
+
+**Note:** Run from your ComfyUI directory by doing `cd C:\path\to\ComfyUI`, or to skip the `cd` command use `--base-path C:\path\to\ComfyUI` to specify the location.
+
+By default `comfyui_triton_sageattention.py` installs Triton and SageAttention 2 (falls back to 1 if unavailable). Add `--with-custom-nodes` to also install VideoHelperSuite and DazzleNodes. It's recommended to add `--backup` to automatically save your environment first, in case you opt to restore later.
 
 ### Check Current Installation
 
@@ -91,7 +94,7 @@ The installer automatically detects the `python_embeded` folder and uses that Py
 Control which Python environment the installer uses with the `--python` flag:
 
 ```bash
-# Default --install auto-detects (portable > venv > system)
+# Default --install auto-detects (portable > .venv > venv > system)
 # To override, use --python with one of the options:
 python comfyui_triton_sageattention.py --install --python {auto, system, venv, portable, .\path\...}
 # --python also supports relative / absolute paths: .\path\to\venv, C:\Python312\python.exe

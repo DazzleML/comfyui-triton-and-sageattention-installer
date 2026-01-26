@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 # Version information
-__version__ = "0.7.2"
+__version__ = "0.7.3"
 
 
 def parse_sage_version(version_str: str) -> Tuple[Optional[int], Optional[str]]:
@@ -273,6 +273,10 @@ class BackupManager:
         if self.handler.environment_type == "portable":
             src = self.base_path / "python_embeded"
             env_type = "python_embeded"
+        elif self.handler.venv_path and self.handler.venv_path.exists():
+            # Use the detected venv_path (handles both .venv and venv)
+            src = self.handler.venv_path
+            env_type = src.name  # ".venv" or "venv"
         else:
             src = self.base_path / "venv"
             env_type = "venv"
@@ -357,6 +361,8 @@ To clean up this backup after successful install:
             # Determine environment type
             if (backup_path / "python_embeded").exists():
                 env_type = "python_embeded"
+            elif (backup_path / ".venv").exists():
+                env_type = ".venv"
             elif (backup_path / "venv").exists():
                 env_type = "venv"
             else:
@@ -679,7 +685,7 @@ class WindowsHandler(PlatformHandler):
         """Setup Windows Python environment based on python_mode.
 
         Modes:
-            auto: portable > venv > system (default behavior)
+            auto: portable > .venv > venv > system (default behavior)
             system: Use system Python directly
             portable: Require portable distribution (error if not found)
             venv: Use/create venv at base_path (skip portable even if exists)
@@ -717,7 +723,7 @@ class WindowsHandler(PlatformHandler):
             self._setup_venv_environment()
             return
 
-        # Auto mode: portable > venv > system
+        # Auto mode: portable > .venv > venv > system
         embeded_path = self.base_path / "python_embeded" / "python.exe"
         if embeded_path.exists():
             self.python_path = embeded_path
@@ -781,7 +787,23 @@ class WindowsHandler(PlatformHandler):
         )
 
     def _setup_venv_environment(self):
-        """Setup or create venv at base_path."""
+        """Setup or create venv at base_path.
+
+        Detection priority: .venv > venv > create new
+        (.venv is used by uv, poetry, and modern Python tooling)
+        """
+        # Try .venv first (uv, poetry, modern tooling)
+        dot_venv_path = self.base_path / ".venv"
+        dot_venv_python = dot_venv_path / "Scripts" / "python.exe"
+
+        if dot_venv_python.exists() and self._validate_python_environment(dot_venv_python):
+            self.python_path = dot_venv_python
+            self.venv_path = dot_venv_path
+            self.environment_type = "venv"
+            self.logger.info(f"Using existing .venv: {self.python_path}")
+            return
+
+        # Then try venv (traditional)
         venv_path = self.base_path / "venv"
         venv_python = venv_path / "Scripts" / "python.exe"
 
@@ -1068,7 +1090,23 @@ class LinuxHandler(PlatformHandler):
         )
 
     def _setup_venv_environment(self):
-        """Setup or create venv at base_path."""
+        """Setup or create venv at base_path.
+
+        Detection priority: .venv > venv > create new
+        (.venv is used by uv, poetry, and modern Python tooling)
+        """
+        # Try .venv first (uv, poetry, modern tooling)
+        dot_venv_path = self.base_path / ".venv"
+        dot_venv_python = dot_venv_path / "bin" / "python"
+
+        if dot_venv_python.exists() and self._validate_python_environment(dot_venv_python):
+            self.python_path = dot_venv_python
+            self.venv_path = dot_venv_path
+            self.environment_type = "venv"
+            self.logger.info(f"Using existing .venv: {self.python_path}")
+            return
+
+        # Then try venv (traditional)
         self.venv_path = self.base_path / "venv"
         venv_python = self.venv_path / "bin" / "python"
 
@@ -1120,7 +1158,7 @@ class LinuxHandler(PlatformHandler):
             raise ComfyUIInstallerError(f"Python interpreter not found at {self.python_path}")
 
         self.logger.info(f"Using Python virtual environment: {self.python_path}")
-    
+
     def _validate_python_environment(self, python_path: Path) -> bool:
         """Validate that a Python environment is functional."""
         try:
@@ -1131,7 +1169,7 @@ class LinuxHandler(PlatformHandler):
         except (ComfyUIInstallerError, FileNotFoundError):
             pass
         return False
-    
+
     def install_build_tools(self) -> bool:
         """Install build tools using the system package manager."""
         # Check if essential build tools are already installed
@@ -1416,7 +1454,23 @@ class MacOSHandler(PlatformHandler):
         )
 
     def _setup_venv_environment(self):
-        """Setup or create venv at base_path."""
+        """Setup or create venv at base_path.
+
+        Detection priority: .venv > venv > create new
+        (.venv is used by uv, poetry, and modern Python tooling)
+        """
+        # Try .venv first (uv, poetry, modern tooling)
+        dot_venv_path = self.base_path / ".venv"
+        dot_venv_python = dot_venv_path / "bin" / "python"
+
+        if dot_venv_python.exists() and self._validate_python_environment(dot_venv_python):
+            self.python_path = dot_venv_python
+            self.venv_path = dot_venv_path
+            self.environment_type = "venv"
+            self.logger.info(f"Using existing .venv: {self.python_path}")
+            return
+
+        # Then try venv (traditional)
         self.venv_path = self.base_path / "venv"
         venv_python = self.venv_path / "bin" / "python"
 
@@ -1463,7 +1517,7 @@ class MacOSHandler(PlatformHandler):
             raise ComfyUIInstallerError(f"Python interpreter not found at {self.python_path}")
 
         self.logger.info(f"Using Python virtual environment: {self.python_path}")
-    
+
     def _validate_python_environment(self, python_path: Path) -> bool:
         """Validate that a Python environment is functional."""
         try:
@@ -3982,7 +4036,7 @@ Examples:
         default="auto",
         metavar="MODE",
         help="Python environment to use: "
-             "'auto' (default: portable > venv > system), "
+             "'auto' (default: portable > .venv > venv > system), "
              "'system' (use system Python directly), "
              "'portable' (require ComfyUI Portable, Windows only), "
              "'venv' (use/create venv at base-path). "

@@ -5,6 +5,24 @@ All notable changes to the ComfyUI Triton and SageAttention installer will be do
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.3] - 2026-01-25
+
+### Added
+- `.venv` detection in auto mode (supports uv, poetry, and modern Python tooling)
+- Auto-detection priority is now: `portable > .venv > venv > system`
+- Quick Start note in README about running from ComfyUI directory
+
+### Fixed
+- BackupManager now uses detected `venv_path` instead of hardcoded `venv` folder
+  - Fixes backup failures when using `.venv` or custom `--python` paths
+- `list_backups()` now correctly identifies `.venv` backup types
+
+### Changed
+- Updated all documentation to reflect new `.venv` detection priority
+
+### Added (Tests)
+- 4 new unit tests for `.venv` backup support (82 total)
+
 ## [0.7.2] - 2026-01-05
 
 ### Fixed

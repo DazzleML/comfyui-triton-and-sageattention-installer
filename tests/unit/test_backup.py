@@ -315,6 +315,7 @@ class TestBackupManagerCreate:
             mock_handler = Mock()
             mock_handler.python_path = venv_dir / "Scripts" / "python.exe"
             mock_handler.environment_type = "venv"
+            mock_handler.venv_path = venv_dir  # Handler detected venv
             mock_handler.run_command = Mock(return_value=Mock(stdout="package==1.0.0\n", returncode=0))
 
             manager = BackupManager(base_path, mock_handler, interactive=True)
@@ -335,6 +336,70 @@ class TestBackupManagerCreate:
             # Check restore instructions
             assert (result / "RESTORE.txt").exists()
 
+    def test_create_backup_dot_venv(self):
+        """Test creating backup of .venv environment (uv, poetry, modern tooling)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base_path = Path(tmpdir)
+
+            # Create .venv to backup (used by uv, poetry, etc.)
+            dot_venv_dir = base_path / ".venv"
+            dot_venv_dir.mkdir()
+            (dot_venv_dir / "test_file.txt").write_text("test content")
+            (dot_venv_dir / "subfolder").mkdir()
+            (dot_venv_dir / "subfolder" / "nested.txt").write_text("nested content")
+
+            mock_handler = Mock()
+            mock_handler.python_path = dot_venv_dir / "Scripts" / "python.exe"
+            mock_handler.environment_type = "venv"
+            mock_handler.venv_path = dot_venv_dir  # Handler detected .venv
+            mock_handler.run_command = Mock(return_value=Mock(stdout="package==1.0.0\n", returncode=0))
+
+            manager = BackupManager(base_path, mock_handler, interactive=True)
+            result = manager.create()
+
+            assert result is not None
+            assert result.exists()
+
+            # Check backup contents - should be under ".venv" not "venv"
+            backup_dot_venv = result / ".venv"
+            assert backup_dot_venv.exists()
+            assert (backup_dot_venv / "test_file.txt").exists()
+            assert (backup_dot_venv / "subfolder" / "nested.txt").exists()
+
+            # Verify "venv" folder was NOT created
+            backup_venv = result / "venv"
+            assert not backup_venv.exists()
+
+            # Check pip freeze was saved
+            assert (result / "requirements.txt").exists()
+
+    def test_create_backup_custom_python_path(self):
+        """Test creating backup with custom --python path."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base_path = Path(tmpdir)
+
+            # Create custom venv at arbitrary location
+            custom_venv = base_path / "my_custom_env"
+            custom_venv.mkdir()
+            (custom_venv / "test_file.txt").write_text("test content")
+
+            mock_handler = Mock()
+            mock_handler.python_path = custom_venv / "Scripts" / "python.exe"
+            mock_handler.environment_type = "venv"
+            mock_handler.venv_path = custom_venv  # Handler detected custom path
+            mock_handler.run_command = Mock(return_value=Mock(stdout="package==1.0.0\n", returncode=0))
+
+            manager = BackupManager(base_path, mock_handler, interactive=True)
+            result = manager.create()
+
+            assert result is not None
+            assert result.exists()
+
+            # Check backup contents - should be under custom name
+            backup_custom = result / "my_custom_env"
+            assert backup_custom.exists()
+            assert (backup_custom / "test_file.txt").exists()
+
     def test_create_backup_no_env(self, capsys):
         """Test creating backup when no environment exists."""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -343,6 +408,7 @@ class TestBackupManagerCreate:
             mock_handler = Mock()
             mock_handler.python_path = Path("/fake/python")
             mock_handler.environment_type = "venv"
+            mock_handler.venv_path = None  # No venv detected
 
             manager = BackupManager(base_path, mock_handler, interactive=True)
             result = manager.create()
@@ -351,3 +417,56 @@ class TestBackupManagerCreate:
 
             captured = capsys.readouterr()
             assert "No environment found" in captured.out
+
+
+class TestBackupManagerListDotVenv:
+    """Tests for list_backups with .venv environments."""
+
+    def test_list_dot_venv_backup(self):
+        """Test listing backup of .venv environment."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base_path = Path(tmpdir)
+
+            # Create .venv backup
+            backup_dir = base_path / ".comfyui_backups" / "20260125_120000"
+            backup_dir.mkdir(parents=True)
+            dot_venv_dir = backup_dir / ".venv"
+            dot_venv_dir.mkdir()
+            (dot_venv_dir / "test.txt").write_text("test")
+
+            mock_handler = Mock()
+            mock_handler.python_path = Path("/fake/python")
+
+            manager = BackupManager(base_path, mock_handler, interactive=True)
+            backups = manager.list_backups()
+
+            assert len(backups) == 1
+            assert backups[0].env_type == ".venv"
+            assert backups[0].timestamp == "20260125_120000"
+
+    def test_list_mixed_backup_types(self):
+        """Test listing mixed backup types (venv, .venv, portable)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base_path = Path(tmpdir)
+
+            # Create different backup types
+            for ts, env_name in [
+                ("20260125_100000", "venv"),
+                ("20260125_110000", ".venv"),
+                ("20260125_120000", "python_embeded"),
+            ]:
+                backup_dir = base_path / ".comfyui_backups" / ts / env_name
+                backup_dir.mkdir(parents=True)
+                (backup_dir / "test.txt").write_text("test")
+
+            mock_handler = Mock()
+            mock_handler.python_path = Path("/fake/python")
+
+            manager = BackupManager(base_path, mock_handler, interactive=True)
+            backups = manager.list_backups()
+
+            assert len(backups) == 3
+            # Ordered by timestamp (newest first)
+            assert backups[0].env_type == "python_embeded"
+            assert backups[1].env_type == ".venv"
+            assert backups[2].env_type == "venv"
