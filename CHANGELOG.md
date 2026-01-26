@@ -5,6 +5,15 @@ All notable changes to the ComfyUI Triton and SageAttention installer will be do
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.4] - 2026-01-25
+
+### Changed (Tests)
+- Refactored `test_backup.py` to reduce duplication (-45% lines)
+- Added `helpers.py` with reusable test utilities
+- Added `temp_base` fixture to `conftest.py`
+- Used `@pytest.mark.parametrize` for env type tests (venv, .venv, custom)
+- Test count: 82 → 83 (parameterization covers more combinations)
+
 ## [0.7.3] - 2026-01-25
 
 ### Added

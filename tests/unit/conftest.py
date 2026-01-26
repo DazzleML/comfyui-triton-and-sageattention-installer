@@ -1,11 +1,32 @@
 """Shared pytest fixtures for unit tests."""
 import pytest
+import tempfile
 from unittest.mock import Mock, patch, MagicMock
 from pathlib import Path
 import sys
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+
+
+# =============================================================================
+# Common Fixtures
+# =============================================================================
+
+@pytest.fixture
+def temp_base():
+    """Provide temporary directory as Path for test isolation.
+
+    Yields:
+        Path to temporary directory, cleaned up after test.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        yield Path(tmpdir)
+
+
+# =============================================================================
+# Fixtures for ComfyUIInstaller Tests
+# =============================================================================
 
 
 @pytest.fixture
