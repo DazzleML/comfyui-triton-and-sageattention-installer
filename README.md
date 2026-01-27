@@ -39,9 +39,21 @@ Installing SageAttention on Windows has been notoriously difficult due to compil
 python comfyui_triton_sageattention.py --install --with-custom-nodes --backup
 ```
 
-**Note:** Run from your ComfyUI directory by doing `cd C:\path\to\ComfyUI`, or to skip the `cd` command use `--base-path C:\path\to\ComfyUI` to specify the location.
+**Note:** Run from your ComfyUI directory by doing `cd C:\path\to\ComfyUI`, or use `--base-path C:\path\to\ComfyUI` to specify the location. If you're unsure where ComfyUI is installed, use `--install discover` to automatically find it.
 
 By default `comfyui_triton_sageattention.py` installs Triton and SageAttention 2 (falls back to 1 if unavailable). Add `--with-custom-nodes` to also install VideoHelperSuite and DazzleNodes. It's recommended to add `--backup` to automatically save your environment first, in case you opt to restore later.
+
+### Find ComfyUI Installations
+
+Not sure where ComfyUI is installed? The installer can find it for you:
+
+```bash
+# List all found ComfyUI installations
+python comfyui_triton_sageattention.py --show-installed locations
+
+# Install with interactive discovery (finds and lets you select)
+python comfyui_triton_sageattention.py --install discover
+```
 
 ### Check Current Installation
 
@@ -212,7 +224,7 @@ Contributions are welcome! Feel free to submit a pull request.
 
 Like the project?
 
-[!["Buy Me A Coffee"](https://camo.githubusercontent.com/0b448aabee402aaf7b3b256ae471e7dc66bcf174fad7d6bb52b27138b2364e47/68747470733a2f2f7777772e6275796d6561636f666665652e636f6d2f6173736574732f696d672f637573746f6d5f696d616765732f6f72616e67655f696d672e706e67)](https://www.buymeacoffee.com/djdarcy)
+[!["Buy Me A Coffee"](https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png)](https://www.buymeacoffee.com/djdarcy)
 
 
 ### Development Setup

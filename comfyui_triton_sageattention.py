@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 # Version information
-__version__ = "0.7.4"
+__version__ = "0.8.0"
 
 
 def parse_sage_version(version_str: str) -> Tuple[Optional[int], Optional[str]]:
@@ -216,6 +216,302 @@ class InstallPlan:
     def get_action(self, component: str) -> Optional[ComponentAction]:
         """Get the action for a specific component."""
         return next((a for a in self.actions if a.component == component), None)
+
+
+# =============================================================================
+# InstallationTarget - Unified WHERE + HOW for Installation
+# =============================================================================
+
+@dataclass
+class PythonEnvironment:
+    """Encapsulates a Python environment's paths and type.
+
+    This is the HOW of an installation - which Python to use.
+    Provides a clean abstraction over the various ways Python can be
+    configured (system, venv, portable distribution).
+    """
+    python_path: Path         # Path to python executable
+    venv_path: Optional[Path] # Path to venv/portable folder (None for system)
+    environment_type: str     # "venv", "portable", "system"
+
+    @classmethod
+    def from_venv(cls, venv_path: Path, platform: str) -> "PythonEnvironment":
+        """Create from existing venv path.
+
+        Args:
+            venv_path: Path to the virtual environment directory
+            platform: "Windows", "Linux", or "Darwin"
+
+        Returns:
+            PythonEnvironment configured for the venv
+        """
+        if platform == "Windows":
+            python_path = venv_path / "Scripts" / "python.exe"
+        else:
+            python_path = venv_path / "bin" / "python"
+        return cls(python_path=python_path, venv_path=venv_path, environment_type="venv")
+
+    @classmethod
+    def from_portable(cls, base_path: Path) -> "PythonEnvironment":
+        """Create from portable distribution (Windows only).
+
+        Args:
+            base_path: Path to ComfyUI directory containing python_embeded
+
+        Returns:
+            PythonEnvironment configured for portable Python
+        """
+        embeded = base_path / "python_embeded"
+        return cls(
+            python_path=embeded / "python.exe",
+            venv_path=embeded,
+            environment_type="portable"
+        )
+
+    @classmethod
+    def system(cls) -> "PythonEnvironment":
+        """Create for system Python.
+
+        Returns:
+            PythonEnvironment using the current Python interpreter
+        """
+        return cls(
+            python_path=Path(sys.executable),
+            venv_path=None,
+            environment_type="system"
+        )
+
+    def exists(self) -> bool:
+        """Check if the Python executable exists."""
+        return self.python_path.exists()
+
+
+@dataclass
+class InstallationTarget:
+    """Represents a ComfyUI installation location with its Python environment.
+
+    This is the WHERE and HOW of an installation:
+    - WHERE: base_path (ComfyUI directory)
+    - HOW: environment (Python to use)
+
+    This class centralizes all the logic for:
+    - Validating ComfyUI directory structure
+    - Discovering Python environments
+    - Finding ComfyUI installations on the system
+    """
+    base_path: Path
+    environment: Optional[PythonEnvironment] = None
+    source: str = "explicit"  # How this target was determined
+    # Possible sources: "explicit" (--base-path), "cwd", "discovered", "config"
+
+    def is_valid_comfyui(self) -> bool:
+        """Check if this is a valid ComfyUI installation directory.
+
+        Supports multiple ComfyUI layouts:
+        1. Traditional/Portable: main.py in root or ComfyUI/ subdirectory
+        2. ComfyUI Desktop: basePath is user data dir with custom_nodes/ and models/
+
+        Returns:
+            True if this appears to be a ComfyUI installation
+        """
+        return is_comfyui_directory(self.base_path)
+
+    def has_python_environment(self) -> bool:
+        """Check if a Python environment exists at this location.
+
+        Checks for:
+        - python_embeded/ (portable distribution)
+        - .venv/ (modern tooling like uv, poetry)
+        - venv/ (traditional venv)
+
+        Returns:
+            True if any Python environment structure is detected
+        """
+        # Check for portable distribution
+        if (self.base_path / "python_embeded" / "python.exe").exists():
+            return True
+        # Check for .venv (uv, poetry, modern tooling)
+        if (self.base_path / ".venv").exists():
+            return True
+        # Check for venv (traditional)
+        if (self.base_path / "venv").exists():
+            return True
+        return False
+
+    def get_environment_candidates(self, platform: str) -> List[PythonEnvironment]:
+        """Get list of potential Python environments at this location.
+
+        Searches in priority order: portable > .venv > venv
+
+        Args:
+            platform: "Windows", "Linux", or "Darwin"
+
+        Returns:
+            List of PythonEnvironment objects that exist at this location
+        """
+        candidates = []
+
+        # Portable (Windows only)
+        if platform == "Windows":
+            portable = self.base_path / "python_embeded" / "python.exe"
+            if portable.exists():
+                candidates.append(PythonEnvironment.from_portable(self.base_path))
+
+        # .venv (modern tooling)
+        dot_venv = self.base_path / ".venv"
+        if dot_venv.exists():
+            env = PythonEnvironment.from_venv(dot_venv, platform)
+            if env.exists():
+                candidates.append(env)
+
+        # venv (traditional)
+        venv = self.base_path / "venv"
+        if venv.exists():
+            env = PythonEnvironment.from_venv(venv, platform)
+            if env.exists():
+                candidates.append(env)
+
+        return candidates
+
+
+def is_comfyui_directory(path: Path) -> bool:
+    """Check if a path is a ComfyUI installation directory.
+
+    Supports multiple ComfyUI layouts:
+    1. Traditional/Portable: main.py in root or ComfyUI/ subdirectory
+    2. ComfyUI Desktop: basePath is user data dir with custom_nodes/ and models/
+
+    Args:
+        path: Directory path to check
+
+    Returns:
+        True if this appears to be a ComfyUI installation or data directory
+    """
+    if not path.exists() or not path.is_dir():
+        return False
+
+    # Traditional/Portable: main.py in root
+    if (path / "main.py").exists():
+        return True
+
+    # Traditional: main.py in ComfyUI subdirectory
+    if (path / "ComfyUI" / "main.py").exists():
+        return True
+
+    # ComfyUI Desktop: user data directory with characteristic structure
+    # Must have custom_nodes/ AND models/ (both are essential ComfyUI directories)
+    if (path / "custom_nodes").is_dir() and (path / "models").is_dir():
+        return True
+
+    return False
+
+
+def discover_comfyui_installations() -> List[Tuple[str, Path]]:
+    """Find ComfyUI installations on the system.
+
+    Searches:
+    1. ComfyUI Desktop config.json (most reliable for Desktop users)
+    2. Common installation locations
+
+    Returns:
+        List of (source_description, path) tuples, ordered by priority.
+        Empty list if no installations found.
+    """
+    found: List[Tuple[str, Path]] = []
+
+    # Only run discovery on Windows for now
+    if platform.system() != "Windows":
+        return found
+
+    # 1. ComfyUI Desktop config (most reliable for Desktop users)
+    config_path = Path.home() / "AppData" / "Roaming" / "ComfyUI" / "config.json"
+    if config_path.exists():
+        try:
+            with open(config_path, encoding="utf-8") as f:
+                config = json.load(f)
+            base_path_str = config.get("basePath", "")
+            if base_path_str:
+                base_path = Path(base_path_str)
+                if base_path.exists() and is_comfyui_directory(base_path):
+                    found.append(("ComfyUI Desktop", base_path))
+        except (json.JSONDecodeError, KeyError, OSError):
+            pass  # Invalid config, skip
+
+    # 2. Common installation locations
+    common_paths = [
+        (Path.home() / "Documents" / "ComfyUI", "Documents folder"),
+        (Path.home() / "ComfyUI", "Home folder"),
+        (Path("C:/ComfyUI"), "C: drive root"),
+        (Path("C:/ComfyUI_windows_portable"), "Portable distribution"),
+        (Path("D:/ComfyUI"), "D: drive"),
+        (Path("D:/ComfyUI_windows_portable"), "D: Portable"),
+    ]
+
+    for path, description in common_paths:
+        if path.exists() and is_comfyui_directory(path):
+            # Avoid duplicates (e.g., Desktop config points to Documents/ComfyUI)
+            if path.resolve() not in [p.resolve() for _, p in found]:
+                found.append((description, path))
+
+    # 3. Include current working directory if it's a valid ComfyUI installation
+    # This ensures discover mode works consistently with auto mode
+    cwd = Path.cwd()
+    if is_comfyui_directory(cwd):
+        if cwd.resolve() not in [p.resolve() for _, p in found]:
+            found.append(("Current directory", cwd))
+
+    return found
+
+
+def select_installation_interactive(
+    installations: List[Tuple[str, Path]],
+    action_description: str = "use"
+) -> Optional[Path]:
+    """Present interactive menu for selecting a ComfyUI installation.
+
+    Args:
+        installations: List of (source_description, path) tuples
+        action_description: Verb describing what will happen (e.g., "install to", "upgrade")
+
+    Returns:
+        Selected path, or None if user cancelled
+    """
+    if not installations:
+        return None
+
+    print(f"\nFound ComfyUI installations:")
+    for i, (source, path) in enumerate(installations, 1):
+        print(f"  [{i}] {path}")
+        print(f"      ({source})")
+
+    print(f"\nSelect installation to {action_description} [1-{len(installations)}], ")
+    print("enter a path, or 'q' to quit: ", end="")
+
+    try:
+        choice = input().strip()
+    except (EOFError, KeyboardInterrupt):
+        return None
+
+    if choice.lower() == 'q':
+        return None
+
+    # Try as index
+    try:
+        idx = int(choice)
+        if 1 <= idx <= len(installations):
+            return installations[idx - 1][1]
+        print(f"Invalid selection: {idx}")
+        return None
+    except ValueError:
+        pass
+
+    # Try as path
+    path = Path(choice)
+    if path.exists() and is_comfyui_directory(path):
+        return path
+
+    print(f"Invalid path or not a ComfyUI installation: {choice}")
+    return None
 
 
 @dataclass
@@ -1710,6 +2006,16 @@ class ComfyUIInstaller:
         # ],
     }
     
+    # Reference resources installed alongside custom nodes
+    RESOURCES = [
+        {
+            "name": "papers",
+            "url": "https://github.com/Way-of-Scarcity/papers.git",
+            "description": "Foundational research papers",
+            "destination": "papers",  # relative to base_path
+        },
+    ]
+
     INCLUDE_LIBS_URL = "https://github.com/woct0rdho/triton-windows/releases/download/v3.0.0-windows.post1/python_3.12.7_include_libs.zip"
     
     # Packages to track for cleanup (matches batch script exactly)
@@ -3629,7 +3935,16 @@ class ComfyUIInstaller:
                             self.handler.pip_install(["-r", str(requirements_file)])
                         except Exception as e:
                             self.logger.warning(f"Failed to install {node_name} requirements: {e}")
-        
+
+            # Clone reference resources (papers, etc.)
+            for resource in self.RESOURCES:
+                res_name = resource["name"]
+                res_url = resource["url"]
+                res_dir = self.base_path / resource["destination"]
+
+                print(f"\n  Installing {res_name}: {resource['description']}")
+                self._update_or_clone_repo(res_dir, res_url, res_name)
+
         # If SageAttention failed, raise at the end so we still install other components
         if sage_failed:
             raise ComfyUIInstallerError("Failed to install SageAttention")
@@ -3988,28 +4303,52 @@ def main():
         epilog="""
 Examples:
   %(prog)s --install                    # Install everything (Step 2)
+  %(prog)s --install discover           # Find ComfyUI installations and select one
   %(prog)s --cleanup                    # Clean up previous installation (Step 1)
   %(prog)s --run                        # Run ComfyUI (equivalent to run_nvidia_gpu.bat)
   %(prog)s --install --verbose          # Install with verbose output
   %(prog)s --install --force            # Force reinstall all components (original script behavior)
   %(prog)s --install --base-path /opt/comfyui  # Install to specific directory
   %(prog)s --upgrade --base-path /opt/comfyui  # Upgrade existing installation
+  %(prog)s --upgrade discover           # Find installations and upgrade selected one
+  %(prog)s --show-installed             # Show installed components (or locations if not in ComfyUI dir)
+  %(prog)s --show-installed locations   # List all found ComfyUI installations
+  %(prog)s --show-installed discover    # Find installations, select one, show its components
   %(prog)s --install --non-interactive --force  # Automated forced install (CI/Docker)
         """
     )
     
     parser.add_argument(
         "--install",
-        action="store_true",
-        help="Run the installation process (equivalent to Step 2 batch script)"
+        nargs="?",
+        const="default",
+        default=None,
+        metavar="MODE",
+        help="Install: uses current directory by default. "
+             "Use 'discover' to find and select from available ComfyUI installations."
     )
 
     parser.add_argument(
         "--upgrade",
-        action="store_true",
+        nargs="?",
+        const="default",
+        default=None,
+        metavar="MODE",
         help="Upgrade existing SageAttention installation to latest compatible version. "
-             "Removes current installation before reinstalling. "
+             "Use 'discover' to find and select from available installations. "
              "Use with --sage-version for explicit target, or --experimental for prerelease versions."
+    )
+
+    parser.add_argument(
+        "--show-installed",
+        nargs="?",
+        const="auto",
+        default=None,
+        choices=["auto", "components", "locations", "discover"],
+        metavar="MODE",
+        help="Show installation info: 'auto' (default - components if in ComfyUI dir, "
+             "locations if not), 'components' (installed packages), 'locations' (found installations), "
+             "'discover' (select from found installations, then show components)"
     )
 
     parser.add_argument(
@@ -4026,9 +4365,10 @@ Examples:
     
     parser.add_argument(
         "--base-path",
-        type=Path,
-        default=Path.cwd(),
-        help="Base installation directory (default: current directory)"
+        default=None,
+        metavar="PATH_OR_MODE",
+        help="ComfyUI directory: a path, 'discover' to find and select installation, "
+             "or 'auto' (check current dir, discover if invalid). Default: current directory."
     )
 
     parser.add_argument(
@@ -4088,12 +4428,6 @@ Examples:
     )
 
     parser.add_argument(
-        "--show-installed",
-        action="store_true",
-        help="Display current installation status (SageAttention, Triton, PyTorch, CUDA, Python)"
-    )
-
-    parser.add_argument(
         "--dryrun",
         action="store_true",
         help="Preview what would be installed/upgraded without making changes"
@@ -4138,21 +4472,150 @@ Examples:
 
     args = parser.parse_args()
 
+    # Normalize action flags (None means not specified, truthy means specified)
+    # --install and --upgrade now use nargs="?" so they're None, "default", or "discover"
+    install_requested = args.install is not None
+    upgrade_requested = args.upgrade is not None
+    show_installed_requested = args.show_installed is not None
+    interactive = not args.non_interactive
+
     # Check for mutually exclusive options
-    if args.install and args.upgrade:
+    if install_requested and upgrade_requested:
         parser.error("--install and --upgrade are mutually exclusive. Use --upgrade to upgrade existing installation.")
 
     # --dryrun requires --install or --upgrade
-    if args.dryrun and not (args.install or args.upgrade):
+    if args.dryrun and not (install_requested or upgrade_requested):
         parser.error("--dryrun requires --install or --upgrade")
 
     # Check if any action was specified
     has_backup_action = args.backup or args.backup_restore or args.backup_clean is not None
-    has_main_action = args.install or args.cleanup or args.run or args.upgrade or args.show_installed or args.dryrun
+    has_main_action = install_requested or args.cleanup or args.run or upgrade_requested or show_installed_requested or args.dryrun
 
     if not (has_main_action or has_backup_action):
         parser.print_help()
         return 1
+
+    # Handle --show-installed locations (doesn't need installer, just list and exit)
+    if args.show_installed == "locations":
+        installations = discover_comfyui_installations()
+        if not installations:
+            print("No ComfyUI installations found.")
+            print("\nSearched:")
+            print("  - ComfyUI Desktop config (%APPDATA%\\ComfyUI\\config.json)")
+            print("  - Common locations (Documents\\ComfyUI, C:\\ComfyUI, etc.)")
+        else:
+            print(f"Found {len(installations)} ComfyUI installation(s):\n")
+            for source, path in installations:
+                print(f"  {path}")
+                print(f"      ({source})")
+        return 0
+
+    # Determine if discovery mode was explicitly requested
+    discover_mode = (
+        args.install == "discover" or
+        args.upgrade == "discover" or
+        args.base_path == "discover" or
+        args.show_installed == "discover"
+    )
+    auto_mode = args.base_path == "auto"
+
+    # Resolve base_path
+    if args.base_path is None:
+        # Default: use current working directory
+        base_path = Path.cwd()
+        base_path_source = "cwd"
+    elif args.base_path in ("discover", "auto"):
+        # Will be resolved below with discovery
+        base_path = Path.cwd()
+        base_path_source = "pending_discovery"
+    else:
+        # Explicit path provided
+        base_path = Path(args.base_path)
+        base_path_source = "explicit"
+
+    # Check if we need discovery (explicit request or CWD is not valid ComfyUI)
+    needs_discovery = discover_mode or (
+        auto_mode and not is_comfyui_directory(base_path)
+    )
+
+    # Hidden auto-discovery: if running --install/--upgrade from invalid directory
+    if not needs_discovery and (install_requested or upgrade_requested):
+        if base_path_source == "cwd" and not is_comfyui_directory(base_path):
+            # Check if there's at least a Python environment (user might be setting up new)
+            target = InstallationTarget(base_path=base_path)
+            if not target.has_python_environment():
+                # No ComfyUI, no Python env - trigger hidden discovery
+                needs_discovery = True
+
+    # Perform discovery if needed
+    if needs_discovery:
+        installations = discover_comfyui_installations()
+
+        if not installations:
+            if interactive:
+                print("No ComfyUI installations found automatically.")
+                print("\nSearched:")
+                print("  - ComfyUI Desktop config (%APPDATA%\\ComfyUI\\config.json)")
+                print("  - Common locations (Documents\\ComfyUI, C:\\ComfyUI, etc.)")
+                print("\nPlease specify the path to your ComfyUI installation:")
+                print("  python installer.py --install --base-path \"C:\\path\\to\\ComfyUI\"")
+                return 1
+            else:
+                print("ERROR: No ComfyUI installation found in current directory.")
+                print("\nPlease specify explicitly:")
+                print("  python installer.py --install --base-path \"C:\\path\\to\\ComfyUI\"")
+                return 1
+
+        if interactive:
+            if args.show_installed == "discover":
+                action_desc = "show status for"
+            elif upgrade_requested:
+                action_desc = "upgrade"
+            else:
+                action_desc = "install to"
+            selected = select_installation_interactive(installations, action_desc)
+            if selected is None:
+                print("Installation cancelled.")
+                return 1
+            base_path = selected
+            base_path_source = "discovered"
+        else:
+            # Non-interactive: fail with hints
+            print("ERROR: No ComfyUI installation found in current directory.")
+            print(f"\nDiscovered {len(installations)} installation(s):")
+            for source, path in installations:
+                print(f"  - {path} ({source})")
+            print("\nPlease specify explicitly:")
+            print(f"  python installer.py --install --base-path \"{installations[0][1]}\"")
+            return 1
+
+    # Handle --show-installed auto mode (now that we have base_path)
+    if args.show_installed == "auto":
+        if not is_comfyui_directory(base_path):
+            # Not in ComfyUI dir, try discovery
+            installations = discover_comfyui_installations()
+            if not installations:
+                print("No ComfyUI installations found.")
+                print("\nSearched:")
+                print("  - ComfyUI Desktop config (%APPDATA%\\ComfyUI\\config.json)")
+                print("  - Common locations (Documents\\ComfyUI, C:\\ComfyUI, etc.)")
+                return 0
+            elif len(installations) == 1:
+                # Single installation found - auto-select and show components
+                source, discovered_path = installations[0]
+                print(f"Found ComfyUI installation: {discovered_path}")
+                print(f"      ({source})\n")
+                base_path = discovered_path
+                # Fall through to show components
+            else:
+                # Multiple installations - show locations list
+                print(f"Found {len(installations)} ComfyUI installation(s):\n")
+                for source, path in installations:
+                    print(f"  {path}")
+                    print(f"      ({source})")
+                print(f"\nUse --show-installed discover to select one and view its components.")
+                return 0
+        # Fall through to show components (handled below)
 
     # Parse --python specifier
     try:
@@ -4162,13 +4625,13 @@ Examples:
 
     # Create installer instance
     installer = ComfyUIInstaller(
-        base_path=args.base_path,
+        base_path=base_path,
         verbose=args.verbose,
-        interactive=not args.non_interactive,
+        interactive=interactive,
         force=args.force,
         sage_version=args.sage_version,
         experimental=args.experimental,
-        upgrade=args.upgrade,
+        upgrade=upgrade_requested,
         with_custom_nodes=args.with_custom_nodes,
         python_specifier=python_specifier
     )
@@ -4176,9 +4639,9 @@ Examples:
     # Handle backup commands
     if has_backup_action:
         backup_manager = BackupManager(
-            base_path=args.base_path,
+            base_path=base_path,
             handler=installer.handler,
-            interactive=not args.non_interactive
+            interactive=interactive
         )
 
         # Standalone backup list - just display and exit
@@ -4194,7 +4657,7 @@ Examples:
         # Standalone backup clean - clean and exit
         if args.backup_clean is not None:
             # If no indices and no install/upgrade, show list and help
-            if not args.backup_clean and not (args.install or args.upgrade):
+            if not args.backup_clean and not (install_requested or upgrade_requested):
                 backups = backup_manager.print_backup_list()
                 if backups:
                     print("\nTo clean specific backups: --backup-clean 1 2 3")
@@ -4223,12 +4686,13 @@ Examples:
                 print("\n[!] Backup failed. Aborting to protect your environment.")
                 return 1
             # If no install/upgrade, we're done
-            if not (args.install or args.upgrade):
+            if not (install_requested or upgrade_requested):
                 return 0
             # Otherwise continue to install/upgrade below
 
     # Handle --show-installed (standalone action, exit after displaying)
-    if args.show_installed:
+    # Note: 'locations' mode is handled earlier before installer creation
+    if show_installed_requested:
         installer.show_installed()
         return 0
 
@@ -4242,12 +4706,12 @@ Examples:
     if args.cleanup:
         installer.cleanup_installation()
 
-    if args.install:
+    if install_requested:
         success = installer.install()
         if not success:
             return 1
 
-    if args.upgrade:
+    if upgrade_requested:
         success = installer.install()  # install() handles upgrade logic internally
         if not success:
             return 1

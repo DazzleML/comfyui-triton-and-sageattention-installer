@@ -12,21 +12,69 @@ python comfyui_triton_sageattention.py [ACTION] [OPTIONS]
 
 | Flag | Description |
 |------|-------------|
-| `--install` | Install Triton and SageAttention |
-| `--upgrade` | Upgrade existing SageAttention installation |
+| `--install [MODE]` | Install Triton and SageAttention. Optional `discover` mode for interactive selection. |
+| `--upgrade [MODE]` | Upgrade existing SageAttention installation. Optional `discover` mode. |
 | `--cleanup` | Remove Triton/SageAttention packages |
 | `--run` | Run ComfyUI with SageAttention enabled |
-| `--show-installed` | Display current installation status |
+| `--show-installed [MODE]` | Display installation info (see modes below) |
 | `--dryrun` | Preview changes without executing (requires `--install` or `--upgrade`) |
+
+### `--install` and `--upgrade` Modes
+
+| Value | Behavior |
+|-------|----------|
+| *(none)* | Use current directory or `--base-path` (default) |
+| `discover` | Find all ComfyUI installations, select interactively |
+
+```bash
+# Standard install (from ComfyUI directory)
+python comfyui_triton_sageattention.py --install
+
+# Discovery mode (from anywhere)
+python comfyui_triton_sageattention.py --install discover
+```
+
+### `--show-installed` Modes
+
+| Value | Behavior |
+|-------|----------|
+| *(none)* or `auto` | Smart mode: components if in ComfyUI dir, auto-select single installation, or list multiple |
+| `components` | Show installed package versions (requires valid ComfyUI dir) |
+| `locations` | List all found ComfyUI installations |
+| `discover` | Find installations, select one interactively, then show its components |
+
+```bash
+# Auto mode - smart detection
+python comfyui_triton_sageattention.py --show-installed
+
+# List all found installations
+python comfyui_triton_sageattention.py --show-installed locations
+
+# Interactive selection then show components
+python comfyui_triton_sageattention.py --show-installed discover
+```
 
 ## Environment Options
 
-### `--base-path PATH`
+### `--base-path [PATH|MODE]`
 
 Base installation directory. Default: current working directory.
 
+| Value | Behavior |
+|-------|----------|
+| `<path>` | Use specified directory |
+| `discover` | Find installations, select interactively |
+| `auto` | Check CWD first, fall back to discovery if invalid |
+
 ```bash
+# Explicit path
 python comfyui_triton_sageattention.py --install --base-path C:\ComfyUI
+
+# Auto-detect with fallback
+python comfyui_triton_sageattention.py --install --base-path auto
+
+# Force discovery
+python comfyui_triton_sageattention.py --install --base-path discover
 ```
 
 ### `--python MODE`

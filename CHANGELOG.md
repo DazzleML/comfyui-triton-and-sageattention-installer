@@ -5,6 +5,44 @@ All notable changes to the ComfyUI Triton and SageAttention installer will be do
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-01-26
+
+### Added
+- **ComfyUI Installation Discovery** - Automatically finds ComfyUI installations when running from wrong directory
+  - Reads ComfyUI Desktop config (`%APPDATA%\ComfyUI\config.json`)
+  - Searches common installation locations (Documents, C:\, D:\)
+  - Includes current working directory if it's a valid ComfyUI installation
+  - Interactive selection when multiple installations found
+- **New CLI modes for discovery:**
+  - `--install discover` - Force discovery mode, select installation interactively
+  - `--upgrade discover` - Same for upgrades
+  - `--show-installed locations` - List all found ComfyUI installations
+  - `--show-installed discover` - Find installations, select one, then show its components
+  - `--show-installed auto` - Smart mode: components if in ComfyUI dir, auto-select if only one found elsewhere, list if multiple
+  - `--base-path discover` - Explicitly request discovery
+  - `--base-path auto` - Check CWD first, fall back to discovery if invalid
+- **New abstractions for cleaner architecture:**
+  - `PythonEnvironment` dataclass - Encapsulates python_path, venv_path, environment_type
+  - `InstallationTarget` dataclass - Encapsulates base_path + environment detection
+  - `is_comfyui_directory()` - Validates ComfyUI installation (supports traditional, portable, and Desktop)
+  - `discover_comfyui_installations()` - Finds all installations on the system
+  - `select_installation_interactive()` - Interactive menu for selecting installation
+- **ComfyUI Desktop support** - Detection recognizes Desktop's user data directory structure
+  (custom_nodes + models) in addition to traditional main.py-based detection
+
+### Changed
+- `--install`, `--upgrade`, `--show-installed` now accept optional mode parameters
+- `--base-path` now accepts keywords (`discover`, `auto`) in addition to paths
+- Non-interactive mode fails with helpful hints listing discovered installations
+- `--show-installed auto` now auto-selects when only one installation is found (no interaction needed)
+
+### Added (Tests)
+- 32 new unit tests for InstallationTarget and discovery functions
+- Test count: 83 → 115
+
+### Fixed (Issue #25)
+- Users running from wrong directory now get helpful discovery instead of confusing errors
+
 ## [0.7.4] - 2026-01-25
 
 ### Changed (Tests)
