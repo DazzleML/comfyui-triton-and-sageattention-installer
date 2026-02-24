@@ -5,6 +5,25 @@ All notable changes to the ComfyUI Triton and SageAttention installer will be do
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.2] - 2026-02-24
+
+### Added
+- **Tabbed stats dashboard** — Installs, Views, Community, and Overview tabs
+- **Views tracking** — Daily page view accumulation in workflow and views badge
+- **Community tab** — Stars (with star history chart), forks, open issues, and daily community trends chart
+- **Overview tab** — Combined multi-metric chart with toggleable datasets
+- **Referrers table** — Top traffic sources with bar visualization on Views tab
+- **Trailing-zero projection** — Dashed line extension for incomplete data points
+- **Privacy note** — Transparency statement explaining all data comes from GitHub's traffic API
+
+### Changed
+- Workflow collects views, stars, forks, issues, and referrers alongside clones/downloads
+- Daily history entries now include views, stars, forks, and open issues for time-series tracking
+- Chart dates display in UTC to prevent timezone day-shift
+- Deduplicate daily history entries by UTC date
+- Total line renders as area-only when it overlaps an individual metric line
+- "Today's Views" card falls back to last day with real data instead of showing 0
+
 ## [0.8.1] - 2026-02-24
 
 ### Added

@@ -32,7 +32,7 @@ jobs:
             console.log(`Release downloads: ${totalDownloads}`);
 
             // 2. Load previous state from gist
-            let state = { totalClones: 0, lastSeenDates: [], totalDownloads: 0, dailyHistory: [] };
+            let state = { totalClones: 0, lastSeenDates: [], totalDownloads: 0, dailyHistory: [], totalViews: 0, lastSeenViewDates: [] };
             if (gistId) {
               try {
                 const gist = await github.rest.gists.get({ gist_id: gistId });
@@ -40,6 +40,7 @@ jobs:
                 if (stateFile) {
                   state = JSON.parse(stateFile.content);
                   if (!state.dailyHistory) state.dailyHistory = [];
+                  if (!state.lastSeenViewDates) state.lastSeenViewDates = [];
                 }
               } catch (e) {
                 console.log(`Could not load gist state: ${e.message}`);
@@ -57,11 +58,9 @@ jobs:
                   newClones += day.count;
                 }
               }
-              // Today's clones = last entry in traffic data (may be partial day)
               if (traffic.data.clones.length > 0) {
                 todayClones = traffic.data.clones[traffic.data.clones.length - 1].count;
               }
-              // Update seen dates (keep last 30 to handle overlaps)
               const allDates = traffic.data.clones.map(d => d.timestamp);
               state.lastSeenDates = allDates.slice(-30);
               console.log(`Recent clones (14d): ${traffic.data.count}`);
@@ -73,7 +72,52 @@ jobs:
             state.totalDownloads = totalDownloads;
             console.log(`Accumulated clones: ${state.totalClones} (+${newClones} new)`);
 
-            // 4. Record daily history (rolling 31-day window)
+            // 4. Accumulate views (same 14-day retention as clones)
+            let newViews = 0;
+            let todayViews = 0;
+            try {
+              const viewTraffic = await github.rest.repos.getViews({ owner, repo, per: "day" });
+              const viewSeenSet = new Set(state.lastSeenViewDates || []);
+              for (const day of viewTraffic.data.views) {
+                if (!viewSeenSet.has(day.timestamp)) {
+                  newViews += day.count;
+                }
+              }
+              if (viewTraffic.data.views.length > 0) {
+                todayViews = viewTraffic.data.views[viewTraffic.data.views.length - 1].count;
+              }
+              state.lastSeenViewDates = viewTraffic.data.views.map(d => d.timestamp).slice(-30);
+              console.log(`Recent views (14d): ${viewTraffic.data.count}`);
+            } catch (e) {
+              console.log(`View accumulation error: ${e.message}`);
+            }
+
+            state.totalViews = (state.totalViews || 0) + newViews;
+            console.log(`Accumulated views: ${state.totalViews} (+${newViews} new)`);
+
+            // 5. Repo metadata snapshot (stars, forks, issues)
+            try {
+              const repoData = await github.rest.repos.get({ owner, repo });
+              state.stars = repoData.data.stargazers_count;
+              state.forks = repoData.data.forks_count;
+              state.openIssues = repoData.data.open_issues_count;
+              console.log(`Repo: ${state.stars} stars, ${state.forks} forks, ${state.openIssues} open issues`);
+            } catch (e) {
+              console.log(`Repo metadata error: ${e.message}`);
+            }
+
+            // 6. Referrers snapshot (top 10, refreshed daily)
+            try {
+              const referrers = await github.rest.repos.getTopReferrers({ owner, repo });
+              state.referrers = referrers.data.map(r => ({
+                source: r.referrer, count: r.count, uniques: r.uniques
+              }));
+              console.log(`Referrers: ${state.referrers.length} sources`);
+            } catch (e) {
+              console.log(`Referrers error: ${e.message}`);
+            }
+
+            // 7. Record daily history (rolling 31-day window)
             const previousDownloads = state.previousTotalDownloads || state.totalDownloads;
             const todayDownloads = Math.max(0, totalDownloads - previousDownloads);
             const todayTotal = todayClones + todayDownloads;
@@ -82,7 +126,11 @@ jobs:
               date: new Date().toISOString(),
               clones: todayClones,
               downloads: todayDownloads,
-              total: todayTotal
+              views: todayViews,
+              total: todayTotal,
+              stars: state.stars || 0,
+              forks: state.forks || 0,
+              openIssues: state.openIssues || 0
             });
 
             // Trim to 31 days
@@ -92,10 +140,10 @@ jobs:
 
             state.previousTotalDownloads = totalDownloads;
 
-            console.log(`Today: ${todayTotal} (${todayDownloads} dls + ${todayClones} clones)`);
+            console.log(`Today: ${todayTotal} installs (${todayDownloads} dls + ${todayClones} clones), ${todayViews} views`);
             console.log(`Daily history: ${state.dailyHistory.length} entries`);
 
-            // 5. Compute cascading recency suffix
+            // 8. Compute cascading recency suffix
             const sumWindow = (n) => {
               const window = state.dailyHistory.slice(-n);
               return window.reduce((sum, d) => sum + (d.total || 0), 0);
@@ -114,28 +162,29 @@ jobs:
 
             console.log(`Recency suffix: "${suffix || "(none)"}"`);
 
-            // 6. Monthly archive (runs on 1st of each month)
+            // 9. Monthly archive (runs on 1st of each month)
             const archiveGistId = process.env.ARCHIVE_GIST_ID;
             const now = new Date();
             if (now.getUTCDate() === 1 && archiveGistId && state.dailyHistory.length > 0) {
-              // Archive previous month's data
               const prevMonth = new Date(now);
               prevMonth.setUTCMonth(prevMonth.getUTCMonth() - 1);
-              const period = prevMonth.toISOString().slice(0, 7); // "YYYY-MM"
+              const period = prevMonth.toISOString().slice(0, 7);
 
               const archive = {
                 repo: `${owner}/${repo}`,
                 period: period,
                 generatedAt: now.toISOString(),
-                version: "0.8.1",
+                version: "0.8.2",
                 cumulativeTotals: {
                   downloads: state.totalDownloads,
                   clones: state.totalClones,
+                  views: state.totalViews,
                   combined: state.totalDownloads + state.totalClones
                 },
                 monthSummary: {
                   downloads: state.dailyHistory.reduce((s, d) => s + (d.downloads || 0), 0),
                   clones: state.dailyHistory.reduce((s, d) => s + (d.clones || 0), 0),
+                  views: state.dailyHistory.reduce((s, d) => s + (d.views || 0), 0),
                   combined: state.dailyHistory.reduce((s, d) => s + (d.total || 0), 0)
                 },
                 dailyHistory: [...state.dailyHistory]
@@ -152,7 +201,7 @@ jobs:
               }
             }
 
-            // 7. Build shields.io endpoint JSON badges
+            // 10. Build shields.io endpoint JSON badges
             const combined = state.totalDownloads + state.totalClones;
             const dlsClonesBadge = {
               schemaVersion: 1,
@@ -175,11 +224,19 @@ jobs:
               color: "blue"
             };
 
-            // 8. Update badge gist
+            const viewsBadge = {
+              schemaVersion: 1,
+              label: "views",
+              message: `${state.totalViews}`,
+              color: "blue"
+            };
+
+            // 11. Update badge gist
             const files = {
               "installs.json": { content: JSON.stringify(dlsClonesBadge, null, 2) },
               "downloads.json": { content: JSON.stringify(downloadsBadge, null, 2) },
               "clones.json": { content: JSON.stringify(clonesBadge, null, 2) },
+              "views.json": { content: JSON.stringify(viewsBadge, null, 2) },
               "state.json": { content: JSON.stringify(state, null, 2) }
             };
 
