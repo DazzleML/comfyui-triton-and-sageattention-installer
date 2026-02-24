@@ -5,6 +5,18 @@ All notable changes to the ComfyUI Triton and SageAttention installer will be do
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.1] - 2026-02-24
+
+### Added
+- **Install statistics dashboard** — GitHub Pages stats page at `/docs/stats/` with Chart.js daily activity chart, summary cards, and archive integration
+- **Traffic badges workflow** — GitHub Actions workflow tracking downloads and clones with cascading recency badge suffix
+- **Installs badge** in README (after License, before Discussions) linking to stats dashboard
+- **GitHub issue utilities** — `scripts/gh_issue_full.py` and `scripts/gh_sub_issues.py`
+
+### Changed
+- Clarify `RESOURCES` array comment to note opt-in behavior and maintainer ownership ([#27](https://github.com/DazzleML/comfyui-triton-and-sageattention-installer/issues/27))
+- Document optional reference resources under `--with-custom-nodes` in `docs/parameters.md` ([#27](https://github.com/DazzleML/comfyui-triton-and-sageattention-installer/issues/27))
+
 ## [0.8.0] - 2026-01-26
 
 ### Added

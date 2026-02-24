@@ -149,7 +149,7 @@ python comfyui_triton_sageattention.py --install --experimental
 
 ### `--with-custom-nodes`
 
-Install recommended custom nodes (VideoHelperSuite, DazzleNodes). Omit for minimal installation.
+Install recommended custom nodes (VideoHelperSuite, DazzleNodes) and optional reference resources. Omit for minimal installation. Non-node resources pulled by this flag are maintainer-owned and contain no executable code. See [Issue #27](https://github.com/DazzleML/comfyui-triton-and-sageattention-installer/issues/27) for details.
 
 ```bash
 python comfyui_triton_sageattention.py --install --with-custom-nodes

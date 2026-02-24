@@ -1,0 +1,201 @@
+name: Track Downloads & Clones
+
+on:
+  schedule:
+    - cron: "0 3 * * *"  # Daily at 3am UTC
+  workflow_dispatch:       # Manual trigger
+
+jobs:
+  update-badges:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch stats and update gist
+        uses: actions/github-script@v7
+        env:
+          GIST_ID: ${{ vars.TRAFFIC_GIST_ID }}
+          ARCHIVE_GIST_ID: ${{ vars.TRAFFIC_ARCHIVE_GIST_ID }}
+        with:
+          github-token: ${{ secrets.TRAFFIC_GIST_TOKEN }}
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const gistId = process.env.GIST_ID;
+
+            // 1. Total release asset downloads
+            let totalDownloads = 0;
+            const releases = await github.rest.repos.listReleases({ owner, repo, per_page: 100 });
+            for (const release of releases.data) {
+              for (const asset of release.assets) {
+                totalDownloads += asset.download_count;
+              }
+            }
+            console.log(`Release downloads: ${totalDownloads}`);
+
+            // 2. Load previous state from gist
+            let state = { totalClones: 0, lastSeenDates: [], totalDownloads: 0, dailyHistory: [] };
+            if (gistId) {
+              try {
+                const gist = await github.rest.gists.get({ gist_id: gistId });
+                const stateFile = gist.data.files["state.json"];
+                if (stateFile) {
+                  state = JSON.parse(stateFile.content);
+                  if (!state.dailyHistory) state.dailyHistory = [];
+                }
+              } catch (e) {
+                console.log(`Could not load gist state: ${e.message}`);
+              }
+            }
+
+            // 3. Accumulate clones (only count new days we haven't seen)
+            let newClones = 0;
+            let todayClones = 0;
+            try {
+              const traffic = await github.rest.repos.getClones({ owner, repo, per: "day" });
+              const seenSet = new Set(state.lastSeenDates || []);
+              for (const day of traffic.data.clones) {
+                if (!seenSet.has(day.timestamp)) {
+                  newClones += day.count;
+                }
+              }
+              // Today's clones = last entry in traffic data (may be partial day)
+              if (traffic.data.clones.length > 0) {
+                todayClones = traffic.data.clones[traffic.data.clones.length - 1].count;
+              }
+              // Update seen dates (keep last 30 to handle overlaps)
+              const allDates = traffic.data.clones.map(d => d.timestamp);
+              state.lastSeenDates = allDates.slice(-30);
+              console.log(`Recent clones (14d): ${traffic.data.count}`);
+            } catch (e) {
+              console.log(`Clone accumulation error: ${e.message}`);
+            }
+
+            state.totalClones = (state.totalClones || 0) + newClones;
+            state.totalDownloads = totalDownloads;
+            console.log(`Accumulated clones: ${state.totalClones} (+${newClones} new)`);
+
+            // 4. Record daily history (rolling 31-day window)
+            const previousDownloads = state.previousTotalDownloads || state.totalDownloads;
+            const todayDownloads = Math.max(0, totalDownloads - previousDownloads);
+            const todayTotal = todayClones + todayDownloads;
+
+            state.dailyHistory.push({
+              date: new Date().toISOString(),
+              clones: todayClones,
+              downloads: todayDownloads,
+              total: todayTotal
+            });
+
+            // Trim to 31 days
+            if (state.dailyHistory.length > 31) {
+              state.dailyHistory = state.dailyHistory.slice(-31);
+            }
+
+            state.previousTotalDownloads = totalDownloads;
+
+            console.log(`Today: ${todayTotal} (${todayDownloads} dls + ${todayClones} clones)`);
+            console.log(`Daily history: ${state.dailyHistory.length} entries`);
+
+            // 5. Compute cascading recency suffix
+            const sumWindow = (n) => {
+              const window = state.dailyHistory.slice(-n);
+              return window.reduce((sum, d) => sum + (d.total || 0), 0);
+            };
+
+            const last24h = state.dailyHistory.length > 0
+              ? state.dailyHistory[state.dailyHistory.length - 1].total || 0
+              : 0;
+            const lastWeek = sumWindow(7);
+            const lastMonth = sumWindow(31);
+
+            let suffix = "";
+            if (last24h > 0) suffix = ` (+${last24h} 24h)`;
+            else if (lastWeek > 0) suffix = ` (+${lastWeek} wk)`;
+            else if (lastMonth > 0) suffix = ` (+${lastMonth} mo)`;
+
+            console.log(`Recency suffix: "${suffix || "(none)"}"`);
+
+            // 6. Monthly archive (runs on 1st of each month)
+            const archiveGistId = process.env.ARCHIVE_GIST_ID;
+            const now = new Date();
+            if (now.getUTCDate() === 1 && archiveGistId && state.dailyHistory.length > 0) {
+              // Archive previous month's data
+              const prevMonth = new Date(now);
+              prevMonth.setUTCMonth(prevMonth.getUTCMonth() - 1);
+              const period = prevMonth.toISOString().slice(0, 7); // "YYYY-MM"
+
+              const archive = {
+                repo: `${owner}/${repo}`,
+                period: period,
+                generatedAt: now.toISOString(),
+                version: "0.8.1",
+                cumulativeTotals: {
+                  downloads: state.totalDownloads,
+                  clones: state.totalClones,
+                  combined: state.totalDownloads + state.totalClones
+                },
+                monthSummary: {
+                  downloads: state.dailyHistory.reduce((s, d) => s + (d.downloads || 0), 0),
+                  clones: state.dailyHistory.reduce((s, d) => s + (d.clones || 0), 0),
+                  combined: state.dailyHistory.reduce((s, d) => s + (d.total || 0), 0)
+                },
+                dailyHistory: [...state.dailyHistory]
+              };
+
+              const archiveFile = `archive-${period}.json`;
+              try {
+                const archiveFiles = {};
+                archiveFiles[archiveFile] = { content: JSON.stringify(archive, null, 2) };
+                await github.rest.gists.update({ gist_id: archiveGistId, files: archiveFiles });
+                console.log(`Archived ${period} to gist (${state.dailyHistory.length} days)`);
+              } catch (e) {
+                console.log(`Archive failed: ${e.message}`);
+              }
+            }
+
+            // 7. Build shields.io endpoint JSON badges
+            const combined = state.totalDownloads + state.totalClones;
+            const dlsClonesBadge = {
+              schemaVersion: 1,
+              label: "installs",
+              message: `${combined}${suffix}`,
+              color: "blue"
+            };
+
+            const downloadsBadge = {
+              schemaVersion: 1,
+              label: "downloads",
+              message: `${state.totalDownloads}`,
+              color: "blue"
+            };
+
+            const clonesBadge = {
+              schemaVersion: 1,
+              label: "clones",
+              message: `${state.totalClones}`,
+              color: "blue"
+            };
+
+            // 8. Update badge gist
+            const files = {
+              "installs.json": { content: JSON.stringify(dlsClonesBadge, null, 2) },
+              "downloads.json": { content: JSON.stringify(downloadsBadge, null, 2) },
+              "clones.json": { content: JSON.stringify(clonesBadge, null, 2) },
+              "state.json": { content: JSON.stringify(state, null, 2) }
+            };
+
+            if (gistId) {
+              await github.rest.gists.update({ gist_id: gistId, files });
+              console.log(`Updated gist: ${gistId}`);
+            } else {
+              const newGist = await github.rest.gists.create({
+                description: `${owner}/${repo} traffic badges`,
+                public: true,
+                files
+              });
+              console.log(`Created new gist: ${newGist.data.id}`);
+              console.log(`⚠️  Set TRAFFIC_GIST_ID repo variable to: ${newGist.data.id}`);
+            }
+
+            console.log(`\nBadge URLs (after setting GIST_ID):`);
+            const gid = gistId || "<GIST_ID>";
+            console.log(`Installs: https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/${owner}/${gid}/raw/installs.json`);

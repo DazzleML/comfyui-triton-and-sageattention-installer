@@ -1,0 +1,715 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ComfyUI Triton &amp; SageAttention Installer - Install Statistics</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"
+            onerror="document.getElementById('chart-fallback').classList.remove('hidden')"></script>
+    <style>
+        :root {
+            --bg-primary: #0d1117;
+            --bg-secondary: #161b22;
+            --bg-tertiary: #1c2128;
+            --border: #30363d;
+            --text-primary: #e6edf3;
+            --text-secondary: #8b949e;
+            --accent-blue: #58a6ff;
+            --accent-green: #3fb950;
+            --accent-purple: #bc8cff;
+            --accent-red: #f85149;
+        }
+
+        *, *::before, *::after { box-sizing: border-box; }
+
+        html, body {
+            margin: 0;
+            padding: 0;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans",
+                         Helvetica, Arial, sans-serif;
+            line-height: 1.5;
+        }
+
+        a { color: var(--accent-blue); text-decoration: none; }
+        a:hover { text-decoration: underline; }
+
+        .container {
+            max-width: 960px;
+            margin: 0 auto;
+            padding: 2rem 1.5rem;
+        }
+
+        /* Header */
+        header { text-align: center; margin-bottom: 2rem; }
+        .banner-link {
+            display: block;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 0.9rem 2rem;
+            margin-bottom: 1.25rem;
+            text-decoration: none;
+            transition: border-color 0.2s;
+        }
+        .banner-link:hover {
+            border-color: var(--accent-blue);
+            text-decoration: none;
+        }
+        .banner-title {
+            font-size: 1.4rem;
+            font-weight: 700;
+            color: var(--text-primary);
+            margin: 0;
+            letter-spacing: -0.01em;
+        }
+        .banner-arrow {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            margin-top: 0.25rem;
+            transition: color 0.2s;
+        }
+        .banner-link:hover .banner-arrow { color: var(--accent-blue); }
+        header h1 {
+            margin: 0 0 0.25rem 0;
+            font-size: 1.75rem;
+            font-weight: 600;
+        }
+        .subtitle {
+            color: var(--text-secondary);
+            font-size: 0.95rem;
+            margin: 0;
+        }
+
+        /* Summary Cards */
+        .summary-cards {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 1rem;
+            margin: 2rem 0;
+        }
+        .card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 1.25rem;
+            text-align: center;
+        }
+        .card-primary { border-color: var(--accent-blue); }
+        .card-label {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            margin-bottom: 0.5rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        .card-value {
+            font-size: 2rem;
+            font-weight: 700;
+            line-height: 1.2;
+        }
+        .card-pct {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            margin-top: 0.25rem;
+        }
+        .card-sub {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            margin-top: 0.25rem;
+        }
+
+        /* Chart */
+        .chart-section { margin: 2rem 0; }
+        .chart-section h2 {
+            font-size: 1.1rem;
+            font-weight: 600;
+            margin-bottom: 1rem;
+        }
+        .chart-note {
+            font-weight: 400;
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+        }
+        .chart-controls {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 1rem;
+        }
+        .chart-btn {
+            padding: 0.4rem 0.85rem;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            background: var(--bg-secondary);
+            color: var(--text-secondary);
+            font-size: 0.8rem;
+            cursor: pointer;
+            transition: border-color 0.15s, color 0.15s;
+        }
+        .chart-btn:hover { border-color: var(--text-secondary); color: var(--text-primary); }
+        .chart-btn.active {
+            border-color: var(--accent-blue);
+            color: var(--accent-blue);
+            background: rgba(88, 166, 255, 0.08);
+        }
+        .chart-container {
+            position: relative;
+            height: 350px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 1rem;
+        }
+        .note {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            margin-top: 0.75rem;
+            font-style: italic;
+        }
+
+        /* Activity Indicators */
+        .activity-section { margin: 2rem 0; }
+        .activity-section h2 {
+            font-size: 1.1rem;
+            font-weight: 600;
+            margin-bottom: 1rem;
+        }
+        .indicators {
+            display: flex;
+            gap: 2rem;
+            flex-wrap: wrap;
+        }
+        .indicator {
+            display: flex;
+            align-items: center;
+            font-size: 0.95rem;
+        }
+        .dot {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 0.5rem;
+            flex-shrink: 0;
+        }
+        .dot.active { background: var(--accent-green); }
+        .dot.inactive { background: var(--border); }
+
+        /* Loading */
+        .loading { text-align: center; padding: 4rem 0; }
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 3px solid var(--border);
+            border-top-color: var(--accent-blue);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            margin: 0 auto 1rem;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .loading p { color: var(--text-secondary); }
+
+        /* Error */
+        .error {
+            background: rgba(248, 81, 73, 0.1);
+            border: 1px solid var(--accent-red);
+            border-radius: 8px;
+            padding: 1rem;
+            text-align: center;
+            margin: 1rem 0;
+        }
+        .error button {
+            margin-left: 1rem;
+            padding: 0.3rem 0.75rem;
+            border: 1px solid var(--accent-red);
+            border-radius: 6px;
+            background: transparent;
+            color: var(--accent-red);
+            cursor: pointer;
+            font-size: 0.85rem;
+        }
+        .error button:hover { background: rgba(248, 81, 73, 0.15); }
+
+        /* Footer */
+        footer {
+            margin-top: 3rem;
+            padding-top: 1.5rem;
+            border-top: 1px solid var(--border);
+            text-align: center;
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+        }
+        footer p { margin: 0.3rem 0; }
+
+        .hidden { display: none !important; }
+
+        @media (max-width: 600px) {
+            .summary-cards { grid-template-columns: repeat(2, 1fr); }
+            .chart-container { height: 250px; }
+            .container { padding: 1.25rem 1rem; }
+            .indicators { gap: 1rem; }
+            .banner-link { padding: 1.25rem 1rem; }
+            .banner-title { font-size: 1.15rem; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <a href="https://github.com/DazzleML/comfyui-triton-and-sageattention-installer" class="banner-link">
+                <p class="banner-title">ComfyUI Triton &amp; SageAttention Installer</p>
+                <p class="banner-arrow">View repository &rarr;</p>
+            </a>
+            <h1>Install Statistics</h1>
+            <p class="subtitle">Download and clone tracking</p>
+        </header>
+
+        <div id="error-banner" class="error hidden">
+            <span>Unable to load statistics. The data source may be temporarily unavailable.</span>
+            <button onclick="loadDashboard()">Retry</button>
+        </div>
+
+        <div id="loading" class="loading">
+            <div class="spinner"></div>
+            <p>Loading statistics...</p>
+        </div>
+
+        <main id="content" class="hidden">
+            <section class="summary-cards">
+                <div class="card card-primary">
+                    <div class="card-label">Total Installs</div>
+                    <div class="card-value" id="total-installs">--</div>
+                    <div class="card-sub">downloads + clones</div>
+                </div>
+                <div class="card">
+                    <div class="card-label">Downloads</div>
+                    <div class="card-value" id="total-downloads">--</div>
+                    <div class="card-pct" id="downloads-pct">--%</div>
+                </div>
+                <div class="card">
+                    <div class="card-label">Clones</div>
+                    <div class="card-value" id="total-clones">--</div>
+                    <div class="card-pct" id="clones-pct">--%</div>
+                </div>
+                <div class="card">
+                    <div class="card-label">Recent Activity</div>
+                    <div class="card-value" id="recent-value">--</div>
+                    <div class="card-sub" id="recent-window">--</div>
+                </div>
+            </section>
+
+            <section class="chart-section">
+                <h2>Daily Activity <span class="chart-note" id="chart-note">(rolling 31-day window)</span></h2>
+                <div class="chart-controls">
+                    <button class="chart-btn active" id="btn-recent" onclick="showRecent()">Last 31 Days</button>
+                    <button class="chart-btn" id="btn-all" onclick="showAllHistory()">All History</button>
+                </div>
+                <div class="chart-container">
+                    <canvas id="activityChart"></canvas>
+                </div>
+                <p id="chart-fallback" class="note hidden">
+                    Chart library could not be loaded. Summary statistics are shown above.
+                </p>
+                <p id="sparse-data-note" class="note hidden">
+                    Tracking started recently. More data points will appear as daily stats accumulate.
+                </p>
+                <p id="archive-loading" class="note hidden">
+                    Loading historical data...
+                </p>
+                <p id="archive-note" class="note hidden"></p>
+            </section>
+
+            <section class="activity-section">
+                <h2>Activity Windows</h2>
+                <div class="indicators">
+                    <div class="indicator">
+                        <span class="dot inactive" id="dot-24h"></span>
+                        <span>Last 24h: <strong id="val-24h">0</strong></span>
+                    </div>
+                    <div class="indicator">
+                        <span class="dot inactive" id="dot-7d"></span>
+                        <span>Last 7 days: <strong id="val-7d">0</strong></span>
+                    </div>
+                    <div class="indicator">
+                        <span class="dot inactive" id="dot-30d"></span>
+                        <span>Last 30 days: <strong id="val-30d">0</strong></span>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <footer>
+            <p>Data updates daily at 3:00 AM UTC &middot; Last data point: <span id="last-updated">--</span></p>
+            <p>
+                <a href="https://github.com/DazzleML/comfyui-triton-and-sageattention-installer">Repository</a> &middot;
+                <a href="https://github.com/DazzleML/comfyui-triton-and-sageattention-installer/releases">Releases</a>
+            </p>
+        </footer>
+    </div>
+
+    <script>
+        // Configuration
+        const GIST_RAW_BASE = 'https://gist.githubusercontent.com/djdarcy/77f23ace7465637447db0a6c79cf46ba/raw';
+        const STATE_URL = GIST_RAW_BASE + '/state.json';
+        const ARCHIVE_GIST_ID = 'b44b12adb623ae3ac8f1993970ab5266';
+        const ARCHIVE_API_URL = 'https://api.github.com/gists/' + ARCHIVE_GIST_ID;
+
+        // State
+        let currentState = null;
+        let chart = null;
+        let archiveData = null; // cached after first fetch
+
+        function fmt(n) {
+            return (n || 0).toLocaleString('en-US');
+        }
+
+        function formatDate(dateStr) {
+            var dt = new Date(dateStr);
+            return dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        }
+
+        function formatDateFull(dateStr) {
+            var dt = new Date(dateStr);
+            return dt.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+        }
+
+        function show(id) { document.getElementById(id).classList.remove('hidden'); }
+        function hide(id) { document.getElementById(id).classList.add('hidden'); }
+        function setText(id, text) { document.getElementById(id).textContent = text; }
+
+        // Main entry point
+        async function loadDashboard() {
+            hide('error-banner');
+            hide('content');
+            show('loading');
+
+            try {
+                var response = await fetch(STATE_URL + '?t=' + Date.now());
+                if (!response.ok) throw new Error('HTTP ' + response.status);
+                currentState = await response.json();
+
+                renderSummary(currentState);
+                renderChart(currentState.dailyHistory || []);
+                renderActivity(currentState);
+
+                hide('loading');
+                show('content');
+            } catch (err) {
+                hide('loading');
+                show('error-banner');
+                console.error('Failed to load stats:', err);
+            }
+        }
+
+        function renderSummary(state) {
+            var totalDl = state.totalDownloads || 0;
+            var totalCl = state.totalClones || 0;
+            var combined = totalDl + totalCl;
+
+            setText('total-installs', fmt(combined));
+            setText('total-downloads', fmt(totalDl));
+            setText('total-clones', fmt(totalCl));
+
+            var dlPct = combined > 0 ? ((totalDl / combined) * 100).toFixed(1) : '0';
+            var clPct = combined > 0 ? ((totalCl / combined) * 100).toFixed(1) : '0';
+            setText('downloads-pct', dlPct + '% of total');
+            setText('clones-pct', clPct + '% of total');
+
+            // Recent activity (cascading)
+            var history = state.dailyHistory || [];
+            var last24h = history.length > 0 ? (history[history.length - 1].total || 0) : 0;
+            var lastWeek = sumWindow(history, 7);
+            var lastMonth = sumWindow(history, 31);
+
+            if (last24h > 0) {
+                setText('recent-value', '+' + fmt(last24h));
+                setText('recent-window', 'in the last 24 hours');
+            } else if (lastWeek > 0) {
+                setText('recent-value', '+' + fmt(lastWeek));
+                setText('recent-window', 'in the last 7 days');
+            } else if (lastMonth > 0) {
+                setText('recent-value', '+' + fmt(lastMonth));
+                setText('recent-window', 'in the last 30 days');
+            } else {
+                setText('recent-value', '0');
+                setText('recent-window', 'no recent activity');
+            }
+        }
+
+        function sumWindow(history, n) {
+            var window = history.slice(-n);
+            return window.reduce(function(sum, d) { return sum + (d.total || 0); }, 0);
+        }
+
+        function renderChart(history) {
+            if (typeof Chart === 'undefined') return; // CDN failed, fallback shown
+
+            if (history.length === 0) {
+                show('sparse-data-note');
+                setText('sparse-data-note', 'No data points available yet. The tracking workflow runs daily at 3:00 AM UTC.');
+                return;
+            }
+
+            if (history.length <= 2) {
+                show('sparse-data-note');
+            }
+
+            var labels = history.map(function(d) { return formatDate(d.date); });
+            var totals = history.map(function(d) { return d.total || 0; });
+            var clones = history.map(function(d) { return d.clones || 0; });
+            var downloads = history.map(function(d) { return d.downloads || 0; });
+            var pointSize = history.length === 1 ? 6 : 3;
+            var smallPoint = history.length === 1 ? 6 : 2;
+
+            var ctx = document.getElementById('activityChart').getContext('2d');
+
+            if (chart) {
+                chart.destroy();
+            }
+
+            chart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: 'Total',
+                            data: totals,
+                            borderColor: '#58a6ff',
+                            backgroundColor: 'rgba(88, 166, 255, 0.1)',
+                            fill: true,
+                            tension: 0.3,
+                            pointRadius: pointSize,
+                            pointHoverRadius: pointSize + 2,
+                            borderWidth: 2
+                        },
+                        {
+                            label: 'Clones',
+                            data: clones,
+                            borderColor: '#bc8cff',
+                            backgroundColor: 'transparent',
+                            fill: false,
+                            tension: 0.3,
+                            pointRadius: smallPoint,
+                            pointHoverRadius: smallPoint + 2,
+                            borderWidth: 2
+                        },
+                        {
+                            label: 'Downloads',
+                            data: downloads,
+                            borderColor: '#3fb950',
+                            backgroundColor: 'transparent',
+                            fill: false,
+                            tension: 0.3,
+                            pointRadius: smallPoint,
+                            pointHoverRadius: smallPoint + 2,
+                            borderWidth: 2
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: {
+                        mode: 'index',
+                        intersect: false
+                    },
+                    scales: {
+                        x: {
+                            ticks: { color: '#8b949e', maxRotation: 45 },
+                            grid: { color: '#30363d' }
+                        },
+                        y: {
+                            beginAtZero: true,
+                            ticks: {
+                                color: '#8b949e',
+                                precision: 0
+                            },
+                            grid: { color: '#30363d' }
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            labels: {
+                                color: '#e6edf3',
+                                usePointStyle: true,
+                                pointStyle: 'circle'
+                            }
+                        },
+                        tooltip: {
+                            backgroundColor: '#161b22',
+                            titleColor: '#e6edf3',
+                            bodyColor: '#8b949e',
+                            borderColor: '#30363d',
+                            borderWidth: 1,
+                            padding: 10,
+                            callbacks: {
+                                label: function(context) {
+                                    return ' ' + context.dataset.label + ': ' + fmt(context.parsed.y);
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+
+            // Update last data point
+            if (history.length > 0) {
+                setText('last-updated', formatDateFull(history[history.length - 1].date));
+            }
+        }
+
+        function renderActivity(state) {
+            var history = state.dailyHistory || [];
+            var last24h = history.length > 0 ? (history[history.length - 1].total || 0) : 0;
+            var last7d = sumWindow(history, 7);
+            var last30d = sumWindow(history, 31);
+
+            setText('val-24h', fmt(last24h));
+            setText('val-7d', fmt(last7d));
+            setText('val-30d', fmt(last30d));
+
+            setDot('dot-24h', last24h > 0);
+            setDot('dot-7d', last7d > 0);
+            setDot('dot-30d', last30d > 0);
+        }
+
+        function setDot(id, active) {
+            var dot = document.getElementById(id);
+            dot.className = active ? 'dot active' : 'dot inactive';
+        }
+
+        // Chart view toggles
+        function showRecent() {
+            if (!currentState) return;
+
+            document.getElementById('btn-recent').classList.add('active');
+            document.getElementById('btn-all').classList.remove('active');
+            setText('chart-note', '(rolling 31-day window)');
+            hide('archive-note');
+            hide('archive-loading');
+
+            renderChart(currentState.dailyHistory || []);
+        }
+
+        async function showAllHistory() {
+            if (!currentState) return;
+
+            document.getElementById('btn-all').classList.add('active');
+            document.getElementById('btn-recent').classList.remove('active');
+
+            // Use cached archive data if available
+            if (archiveData) {
+                renderFullHistory();
+                return;
+            }
+
+            show('archive-loading');
+            hide('archive-note');
+
+            try {
+                var response = await fetch(ARCHIVE_API_URL);
+                if (!response.ok) {
+                    if (response.status === 404) {
+                        throw new Error('Archive gist not found');
+                    }
+                    if (response.status === 403) {
+                        throw new Error('GitHub API rate limit reached. Try again later.');
+                    }
+                    throw new Error('HTTP ' + response.status);
+                }
+
+                var gist = await response.json();
+                var archiveFiles = [];
+
+                // Collect all archive-YYYY-MM.json files (skip init and non-archive files)
+                for (var filename in gist.files) {
+                    if (filename.match(/^archive-\d{4}-\d{2}\.json$/)) {
+                        archiveFiles.push(gist.files[filename]);
+                    }
+                }
+
+                if (archiveFiles.length === 0) {
+                    hide('archive-loading');
+                    show('archive-note');
+                    setText('archive-note', 'No archived monthly data yet. Monthly archives begin on the 1st of each month. Showing current rolling window.');
+                    setText('chart-note', '(all available data)');
+                    renderChart(currentState.dailyHistory || []);
+                    return;
+                }
+
+                // Fetch each archive file's raw content
+                var allHistory = [];
+                for (var i = 0; i < archiveFiles.length; i++) {
+                    try {
+                        var rawUrl = archiveFiles[i].raw_url;
+                        var archiveResp = await fetch(rawUrl);
+                        if (archiveResp.ok) {
+                            var archiveContent = await archiveResp.json();
+                            if (archiveContent.dailyHistory && archiveContent.dailyHistory.length > 0) {
+                                allHistory = allHistory.concat(archiveContent.dailyHistory);
+                            }
+                        }
+                    } catch (e) {
+                        console.warn('Failed to load archive file:', archiveFiles[i].filename, e);
+                    }
+                }
+
+                // Append current rolling data
+                var currentHistory = currentState.dailyHistory || [];
+                allHistory = allHistory.concat(currentHistory);
+
+                // Deduplicate by date (keep latest entry for each date)
+                var seen = {};
+                var deduplicated = [];
+                for (var j = 0; j < allHistory.length; j++) {
+                    var dateKey = allHistory[j].date.slice(0, 10); // YYYY-MM-DD
+                    if (!seen[dateKey]) {
+                        seen[dateKey] = true;
+                        deduplicated.push(allHistory[j]);
+                    }
+                }
+
+                // Sort chronologically
+                deduplicated.sort(function(a, b) {
+                    return new Date(a.date) - new Date(b.date);
+                });
+
+                archiveData = deduplicated;
+                renderFullHistory();
+
+            } catch (err) {
+                hide('archive-loading');
+                show('archive-note');
+                setText('archive-note', 'Could not load historical data: ' + err.message + '. Showing current rolling window.');
+                renderChart(currentState.dailyHistory || []);
+            }
+        }
+
+        function renderFullHistory() {
+            hide('archive-loading');
+            var data = archiveData || (currentState ? currentState.dailyHistory : []) || [];
+            var months = data.length > 0
+                ? Math.ceil((new Date(data[data.length - 1].date) - new Date(data[0].date)) / (1000 * 60 * 60 * 24 * 30))
+                : 0;
+            var label = data.length + ' data points';
+            if (months > 1) label += ' over ~' + months + ' months';
+            setText('chart-note', '(' + label + ')');
+
+            if (archiveData && archiveData.length > (currentState.dailyHistory || []).length) {
+                show('archive-note');
+                setText('archive-note', 'Showing all available historical data including monthly archives.');
+            } else {
+                show('archive-note');
+                setText('archive-note', 'No additional archived data found beyond the current rolling window.');
+            }
+
+            renderChart(data);
+        }
+
+        // Boot
+        document.addEventListener('DOMContentLoaded', loadDashboard);
+    </script>
+</body>
+</html>

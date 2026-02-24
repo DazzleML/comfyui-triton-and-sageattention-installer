@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 # Version information
-__version__ = "0.8.0"
+__version__ = "0.8.1"
 
 
 def parse_sage_version(version_str: str) -> Tuple[Optional[int], Optional[str]]:
@@ -2006,7 +2006,8 @@ class ComfyUIInstaller:
         # ],
     }
     
-    # Reference resources installed alongside custom nodes
+    # Optional reference resources, only cloned when --with-custom-nodes is used.
+    # Contains maintainer-owned document repos (no executable code). See Issue #27.
     RESOURCES = [
         {
             "name": "papers",
