@@ -4,7 +4,7 @@
 [![Windows](https://img.shields.io/badge/platform-Windows-blue.svg)](https://www.microsoft.com/windows)
 [![CUDA 11.8+](https://img.shields.io/badge/CUDA-11.8+-green.svg)](https://developer.nvidia.com/cuda-downloads)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Installs](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/djdarcy/77f23ace7465637447db0a6c79cf46ba/raw/installs.json)](https://dazzleml.github.io/comfyui-triton-and-sageattention-installer/stats/)
+[![Installs](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/djdarcy/77f23ace7465637447db0a6c79cf46ba/raw/installs.json)](https://dazzleml.github.io/comfyui-triton-and-sageattention-installer/stats/#installs)
 [![GitHub Discussions](https://img.shields.io/github/discussions/DazzleML/comfyui-triton-and-sageattention-installer)](https://github.com/DazzleML/comfyui-triton-and-sageattention-installer/discussions)
 
 Cross-platform installer for Triton and SageAttention on ComfyUI. Simplifies GPU-accelerated inference setup for Windows users with automated dependency management and RTX 5090 support.

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ComfyUI Triton &amp; SageAttention Installer - Install Statistics</title>
+    <title>ComfyUI Triton &amp; SageAttention - Project Statistics</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"
             onerror="document.getElementById('chart-fallback').classList.remove('hidden')"></script>
     <style>
@@ -20,6 +20,8 @@
             --accent-red: #f85149;
             --accent-orange: #d29922;
             --accent-pink: #f778ba;
+            --accent-purple-light: #d4b8ff;
+            --accent-blue-light: #8ec5ff;
         }
 
         *, *::before, *::after { box-sizing: border-box; }
@@ -224,7 +226,8 @@
             margin-right: 0.5rem;
             flex-shrink: 0;
         }
-        .dot.active { background: var(--accent-green); }
+        .dot.active { background: var(--accent-green); box-shadow: 0 0 6px rgba(63, 185, 80, 0.5); }
+        .dot.warning { background: var(--accent-orange); box-shadow: 0 0 6px rgba(210, 153, 34, 0.5); }
         .dot.inactive { background: var(--border); }
 
         /* Referrers Table */
@@ -263,6 +266,76 @@
             margin-top: 0.25rem;
             transition: width 0.3s;
         }
+        .path-text {
+            font-family: monospace;
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            word-break: break-all;
+        }
+
+        /* Punch card heat map */
+        .punch-card { border-collapse: collapse; margin-top: 0.5rem; }
+        .punch-card th, .punch-card td {
+            padding: 0;
+            text-align: center;
+            font-size: 0.65rem;
+            color: var(--text-secondary);
+        }
+        .punch-card th { padding: 0 0.3rem; font-weight: 400; }
+        .punch-cell {
+            width: 18px;
+            height: 18px;
+            border-radius: 3px;
+            margin: 1px;
+            display: inline-block;
+        }
+
+        /* Dev tab metadata */
+        .meta-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 0.75rem;
+            margin-top: 1rem;
+        }
+        .meta-item {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 0.75rem 1rem;
+            font-size: 0.85rem;
+        }
+        .meta-label {
+            color: var(--text-secondary);
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 0.25rem;
+        }
+        .meta-value { color: var(--text-primary); font-weight: 500; }
+
+        /* Contributor list */
+        .contributor-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+            gap: 0.75rem;
+            margin-top: 0.5rem;
+        }
+        .contributor-item {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 0.75rem;
+        }
+        .contributor-item img {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+        }
+        .contributor-name { font-weight: 500; font-size: 0.9rem; }
+        .contributor-stats { font-size: 0.75rem; color: var(--text-secondary); }
 
         /* Community stats */
         .stat-row {
@@ -332,6 +405,28 @@
         }
         @keyframes spin { to { transform: rotate(360deg); } }
         .loading p { color: var(--text-secondary); }
+        .spinner-sm {
+            width: 14px;
+            height: 14px;
+            border: 2px solid var(--border);
+            border-top-color: var(--accent-blue);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            display: inline-block;
+            vertical-align: middle;
+            margin-right: 0.4rem;
+        }
+        .stats-loading {
+            color: var(--text-secondary);
+            font-size: 0.85rem;
+            padding: 0.5rem 0;
+        }
+        .stats-error {
+            color: var(--text-secondary);
+            font-size: 0.85rem;
+            padding: 0.5rem 0;
+            font-style: italic;
+        }
 
         /* Error */
         .error {
@@ -402,8 +497,8 @@
                 <p class="banner-title">ComfyUI Triton &amp; SageAttention Installer</p>
                 <p class="banner-arrow">View repository &rarr;</p>
             </a>
-            <h1>Install Statistics</h1>
-            <p class="subtitle">Download, clone, and traffic tracking</p>
+            <h1>Project Statistics</h1>
+            <p class="subtitle">Downloads, clones, views, and community insights</p>
         </header>
 
         <div id="error-banner" class="error hidden">
@@ -419,14 +514,15 @@
         <main id="content" class="hidden">
             <!-- Tab Bar -->
             <nav class="tab-bar">
-                <div class="tab active" data-tab="installs" onclick="switchTab('installs')">Installs</div>
+                <div class="tab active" data-tab="overview" onclick="switchTab('overview')">Overview</div>
+                <div class="tab" data-tab="installs" onclick="switchTab('installs')">Installs</div>
                 <div class="tab" data-tab="views" onclick="switchTab('views')">Views</div>
                 <div class="tab" data-tab="community" onclick="switchTab('community')">Community</div>
-                <div class="tab" data-tab="overview" onclick="switchTab('overview')">Overview</div>
+                <div class="tab" data-tab="dev" onclick="switchTab('dev')">Dev</div>
             </nav>
 
             <!-- ==================== INSTALLS TAB ==================== -->
-            <div id="tab-installs" class="tab-content active">
+            <div id="tab-installs" class="tab-content">
                 <section class="summary-cards">
                     <div class="card card-primary">
                         <div class="card-label">Total Installs</div>
@@ -434,7 +530,7 @@
                         <div class="card-sub">downloads + clones</div>
                     </div>
                     <div class="card">
-                        <div class="card-label">Downloads</div>
+                        <div class="card-label">Release Downloads</div>
                         <div class="card-value" id="total-downloads">--</div>
                         <div class="card-pct" id="downloads-pct">--%</div>
                     </div>
@@ -442,6 +538,7 @@
                         <div class="card-label">Clones</div>
                         <div class="card-value" id="total-clones">--</div>
                         <div class="card-pct" id="clones-pct">--%</div>
+                        <div class="card-sub" id="clones-unique">-- tracked unique</div>
                     </div>
                     <div class="card">
                         <div class="card-label">Recent Activity</div>
@@ -494,12 +591,12 @@
                     <div class="card card-primary">
                         <div class="card-label">Total Views</div>
                         <div class="card-value" id="total-views">--</div>
-                        <div class="card-sub">page views (accumulated)</div>
+                        <div class="card-sub" id="total-views-unique">-- unique visitors</div>
                     </div>
                     <div class="card">
                         <div class="card-label">Today's Views</div>
                         <div class="card-value" id="today-views">--</div>
-                        <div class="card-sub">latest data point</div>
+                        <div class="card-sub" id="today-views-sub">latest data point</div>
                     </div>
                     <div class="card">
                         <div class="card-label">7-Day Views</div>
@@ -533,6 +630,23 @@
                         </thead>
                         <tbody id="referrers-body">
                             <tr><td colspan="4" style="color: var(--text-secondary); text-align: center;">No referrer data available</td></tr>
+                        </tbody>
+                    </table>
+                </section>
+
+                <section class="activity-section">
+                    <h2>Popular Pages <span class="chart-note">(14-day snapshot)</span></h2>
+                    <table class="referrers-table" id="paths-table">
+                        <thead>
+                            <tr>
+                                <th>#</th>
+                                <th>Page</th>
+                                <th>Views</th>
+                                <th>Unique</th>
+                            </tr>
+                        </thead>
+                        <tbody id="paths-body">
+                            <tr><td colspan="4" style="color: var(--text-secondary); text-align: center;">No path data available</td></tr>
                         </tbody>
                     </table>
                 </section>
@@ -578,15 +692,17 @@
             </div>
 
             <!-- ==================== OVERVIEW TAB ==================== -->
-            <div id="tab-overview" class="tab-content">
+            <div id="tab-overview" class="tab-content active">
                 <section class="summary-cards">
                     <div class="card card-primary">
                         <div class="card-label">Total Installs</div>
                         <div class="card-value" id="ov-installs">--</div>
+                        <div class="card-sub" id="ov-installs-unique">-- tracked unique cloners</div>
                     </div>
                     <div class="card">
                         <div class="card-label">Total Views</div>
                         <div class="card-value" id="ov-views">--</div>
+                        <div class="card-sub" id="ov-views-unique">-- unique viewers</div>
                     </div>
                     <div class="card">
                         <div class="card-label">Stars</div>
@@ -602,14 +718,24 @@
                     <h2>Combined Daily Activity <span class="chart-note">(all metrics)</span></h2>
                     <div class="toggle-row">
                         <label class="toggle-label">
-                            <input type="checkbox" id="ov-toggle-views" checked onchange="renderOverviewChart()">
+                            <input type="checkbox" id="ov-toggle-views" onchange="renderOverviewChart()">
                             <span class="toggle-swatch" style="background: var(--accent-blue);"></span>
                             Views
                         </label>
                         <label class="toggle-label">
-                            <input type="checkbox" id="ov-toggle-clones" checked onchange="renderOverviewChart()">
+                            <input type="checkbox" id="ov-toggle-unique-views" checked onchange="renderOverviewChart()">
+                            <span class="toggle-swatch" style="background: var(--accent-blue-light);"></span>
+                            Unique Views
+                        </label>
+                        <label class="toggle-label">
+                            <input type="checkbox" id="ov-toggle-clones" onchange="renderOverviewChart()">
                             <span class="toggle-swatch" style="background: var(--accent-purple);"></span>
                             Clones
+                        </label>
+                        <label class="toggle-label">
+                            <input type="checkbox" id="ov-toggle-unique-clones" checked onchange="renderOverviewChart()">
+                            <span class="toggle-swatch" style="background: var(--accent-purple-light);"></span>
+                            Unique Clones
                         </label>
                         <label class="toggle-label">
                             <input type="checkbox" id="ov-toggle-downloads" checked onchange="renderOverviewChart()">
@@ -625,6 +751,131 @@
                     <div class="chart-container">
                         <canvas id="overviewChart"></canvas>
                     </div>
+                </section>
+            </div>
+
+            <!-- ==================== DEV TAB ==================== -->
+            <div id="tab-dev" class="tab-content">
+                <!-- CI Audit Cards -->
+                <section class="summary-cards">
+                    <div class="card" title="Includes ~1,000 base approximation from before CI tracking began">
+                        <div class="card-label">Raw Clones</div>
+                        <div class="card-value" id="dev-raw-clones">--</div>
+                        <div class="card-sub">includes CI + base estimate</div>
+                    </div>
+                    <div class="card">
+                        <div class="card-label">CI Checkouts</div>
+                        <div class="card-value" id="dev-ci-checkouts">--</div>
+                        <div class="card-sub" id="dev-ci-rate">--% of tracked</div>
+                    </div>
+                    <div class="card card-primary">
+                        <div class="card-label">Organic Clones</div>
+                        <div class="card-value" id="dev-organic-clones">--</div>
+                        <div class="card-sub" id="dev-unique-clones">-- unique cloners</div>
+                    </div>
+                    <div class="card">
+                        <div class="card-label">Data Freshness</div>
+                        <div class="card-value" id="dev-freshness">--</div>
+                        <div class="card-sub" id="dev-last-capture">--</div>
+                    </div>
+                </section>
+
+                <!-- Raw vs Organic Chart -->
+                <section class="chart-section">
+                    <h2>Clone Breakdown <span class="chart-note">(raw vs organic vs unique)</span></h2>
+                    <div class="chart-container">
+                        <canvas id="devChart"></canvas>
+                    </div>
+                    <details class="chart-key" style="margin-top: 0.5rem; font-size: 0.82rem; color: var(--text-secondary); line-height: 1.6;">
+                        <summary style="cursor: pointer; color: var(--text-secondary); font-size: 0.8rem;">Terminology guide</summary>
+                        <div style="margin-top: 0.4rem; padding: 0.6rem 0.8rem; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-tertiary);">
+                            <p style="margin: 0 0 0.4rem;"><strong style="color: var(--accent-orange);">Raw Clones</strong> &mdash; Total git clones reported by the GitHub Traffic API. Includes CI/CD automation, bots, and real users.</p>
+                            <p style="margin: 0 0 0.4rem;"><strong style="color: var(--accent-green);">Organic Clones</strong> &mdash; Raw clones minus detected CI checkout operations. Represents actual user activity. <em>Formula: raw &minus; ciCheckouts</em></p>
+                            <p style="margin: 0 0 0.4rem;"><strong style="color: var(--accent-purple-light);">Raw Unique Clones</strong> <span style="opacity:0.7">(dashed)</span> &mdash; Distinct IPs/identities that cloned, as reported by GitHub. Includes both CI runners and real users.</p>
+                            <p style="margin: 0;"><strong style="color: var(--accent-purple-light);">Organic Unique Clones</strong> <span style="opacity:0.7">(solid)</span> &mdash; Estimated real unique cloners after removing CI. <em>Formula: raw unique &minus; MIN(round(rawUnique &times; ciRate), ciRuns)</em>. The MIN ensures CI never contributes more unique clones than distinct workflow runs.</p>
+                        </div>
+                    </details>
+                </section>
+
+                <!-- CI Breakdown Table -->
+                <section class="activity-section">
+                    <h2>CI Checkout Breakdown <span class="chart-note">(last 31 days)</span></h2>
+                    <table class="referrers-table" id="ci-table">
+                        <thead>
+                            <tr>
+                                <th>Date</th>
+                                <th>CI Checkouts</th>
+                                <th>Workflows</th>
+                            </tr>
+                        </thead>
+                        <tbody id="ci-breakdown-body">
+                            <tr><td colspan="3" style="color: var(--text-secondary); text-align: center;">No CI checkout data collected yet</td></tr>
+                        </tbody>
+                    </table>
+                </section>
+
+                <!-- Operational Status -->
+                <section class="activity-section">
+                    <h2>Operational Status</h2>
+                    <div class="meta-grid">
+                        <div class="meta-item">
+                            <div class="meta-label">Last Data Capture</div>
+                            <div class="meta-value"><span class="dot" id="dev-health-dot"></span><span id="dev-capture-time">--</span></div>
+                        </div>
+                        <div class="meta-item">
+                            <div class="meta-label">Workflow Schedule</div>
+                            <div class="meta-value">Daily 3AM UTC + after CI</div>
+                        </div>
+                        <div class="meta-item">
+                            <div class="meta-label">Data Retention</div>
+                            <div class="meta-value">31 days (archived monthly)</div>
+                        </div>
+                        <div class="meta-item">
+                            <div class="meta-label">Dashboard Version</div>
+                            <div class="meta-value" id="dev-version">0.7.11</div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Commit Activity -->
+                <section class="chart-section">
+                    <h2>Commit Activity <span class="chart-note">(52 weeks &middot; click bar to view commits)</span></h2>
+                    <div id="commit-status" class="stats-loading"><div class="spinner-sm"></div> Fetching from GitHub...</div>
+                    <div class="chart-container">
+                        <canvas id="commitChart"></canvas>
+                    </div>
+                </section>
+
+                <!-- Code Frequency -->
+                <section class="chart-section">
+                    <h2>Code Frequency <span class="chart-note">(additions &amp; deletions)</span></h2>
+                    <div id="codefreq-status" class="stats-loading"><div class="spinner-sm"></div> Fetching from GitHub...</div>
+                    <div class="chart-container">
+                        <canvas id="codeFreqChart"></canvas>
+                    </div>
+                </section>
+
+                <!-- Participation -->
+                <section class="chart-section">
+                    <h2>Participation <span class="chart-note">(maintainer vs community, 52 weeks &middot; click to view)</span></h2>
+                    <div id="participation-status" class="stats-loading"><div class="spinner-sm"></div> Fetching from GitHub...</div>
+                    <div class="chart-container">
+                        <canvas id="participationChart"></canvas>
+                    </div>
+                </section>
+
+                <!-- Punch Card -->
+                <section class="chart-section">
+                    <h2>Punch Card <span class="chart-note">(commits by day &amp; hour)</span></h2>
+                    <div id="punchcard-status" class="stats-loading"><div class="spinner-sm"></div> Fetching from GitHub...</div>
+                    <div id="punch-card-container" style="overflow-x: auto;"></div>
+                </section>
+
+                <!-- Contributors -->
+                <section class="activity-section">
+                    <h2>Contributors</h2>
+                    <div id="contributors-status" class="stats-loading"><div class="spinner-sm"></div> Fetching from GitHub...</div>
+                    <div id="contributors-list" class="contributor-grid"></div>
                 </section>
             </div>
         </main>
@@ -656,6 +907,7 @@
         const REPO_OWNER = 'DazzleML';
         const REPO_NAME = 'comfyui-triton-and-sageattention-installer';
         const REPO_CREATED = '2025-07-23'; // for project age calculation
+        var primaryAuthor = null; // resolved from contributors API (org-owned repos have owner=org, not committer)
 
         // State
         let currentState = null;
@@ -685,35 +937,91 @@
 
         function sumWindow(history, n, field) {
             var w = history.slice(-n);
-            return w.reduce(function(sum, d) { return sum + (d[field || 'total'] || 0); }, 0);
+            if (field) {
+                return w.reduce(function(sum, d) { return sum + (d[field] || 0); }, 0);
+            }
+            // Default: organic installs (organicClones + downloads)
+            return w.reduce(function(sum, d) {
+                return sum + (d.organicClones !== undefined ? d.organicClones : (d.clones || 0)) + (d.downloads || 0);
+            }, 0);
         }
 
-        // Detect trailing zeros and replace with last real value for projection.
-        // Returns { data: [...], projectedFrom: index } where projectedFrom is
-        // the first projected index. If no projection, projectedFrom === data.length.
-        function projectTrailingZeros(values) {
-            var lastRealIdx = values.length - 1;
-            while (lastRealIdx >= 0 && values[lastRealIdx] === 0) {
-                lastRealIdx--;
+        // Compute organic unique clones for a daily entry client-side.
+        // Uses MIN(percentage estimate, ciRuns ceiling) formula.
+        // Returns null if uniqueClones data is absent (expired API window).
+        // Returns the pre-computed value if available, otherwise calculates it.
+        function getOrganicUniqueClones(entry) {
+            if (entry.organicUniqueClones !== undefined) return entry.organicUniqueClones;
+            if (entry.uniqueClones === undefined || entry.uniqueClones === null) return null;
+            var rawUnique = entry.uniqueClones;
+            var ciRate = (entry.clones || 0) > 0 ? entry.ciCheckouts / entry.clones : 0;
+            var ciUniqueByPct = Math.round(rawUnique * ciRate);
+            var ciUniqueCeiling = entry.ciRuns || 0;
+            var ciUniqueClones = Math.min(ciUniqueByPct, ciUniqueCeiling);
+            return Math.max(0, rawUnique - ciUniqueClones);
+        }
+
+        // Project missing data at both ends of a series:
+        // - Trailing: today's incomplete zero → project from yesterday's confirmed value
+        // - Leading: null values at start → project from first real value (expired API data)
+        // Past days with 0 are real data (validated by the 3AM UTC recheck).
+        // Returns { data: [...], projectedFrom: index, projectedTo: index }
+        //   projectedFrom: first trailing projected index (dataLength if none)
+        //   projectedTo: last leading projected index + 1 (0 if none)
+        function projectTrailingZeros(values, dates) {
+            if (!dates || values.length < 2) {
+                return { data: values, projectedFrom: values.length, projectedTo: 0 };
             }
-            if (lastRealIdx < 0 || lastRealIdx === values.length - 1) {
-                return { data: values, projectedFrom: values.length };
-            }
+
             var result = values.slice();
-            var lastVal = result[lastRealIdx];
-            for (var i = lastRealIdx + 1; i < result.length; i++) {
-                result[i] = lastVal;
+            var projectedTo = 0;
+
+            // Leading nulls: find first real (non-null) value and backfill
+            var firstRealIdx = -1;
+            for (var i = 0; i < result.length; i++) {
+                if (result[i] !== null && result[i] !== undefined) {
+                    firstRealIdx = i;
+                    break;
+                }
             }
-            return { data: result, projectedFrom: lastRealIdx + 1 };
+            if (firstRealIdx > 0) {
+                for (var i = 0; i < firstRealIdx; i++) {
+                    result[i] = result[firstRealIdx];
+                }
+                projectedTo = firstRealIdx;
+            }
+
+            // Trailing zeros: only project if the last entry is today AND its value is 0
+            var lastIdx = result.length - 1;
+            var today = new Date().toISOString().slice(0, 10);
+            var lastDate = (dates[lastIdx] || '').slice(0, 10);
+            var projectedFrom = result.length;
+
+            if ((result[lastIdx] === 0 || result[lastIdx] === null) && lastDate === today) {
+                result[lastIdx] = result[lastIdx - 1];
+                if (result[lastIdx] !== 0 && result[lastIdx] !== null) {
+                    projectedFrom = lastIdx;
+                }
+            }
+
+            return { data: result, projectedFrom: projectedFrom, projectedTo: projectedTo };
         }
 
-        // Build Chart.js segment config for dashed projection from a given index.
-        // The dashed segment starts from the last real point to the first projected point.
-        function projectionSegmentConfig(projectedFrom, dataLength) {
-            if (projectedFrom >= dataLength) return {};
+        // Build Chart.js segment config for dashed projection at both ends.
+        // Leading projection: segments before projectedTo are dashed.
+        // Trailing projection: segments from projectedFrom onward are dashed.
+        function projectionSegmentConfig(projectedFrom, dataLength, projectedTo) {
+            var hasTrailing = projectedFrom < dataLength;
+            var hasLeading = (projectedTo || 0) > 0;
+            if (!hasTrailing && !hasLeading) return {};
+            var leadEnd = projectedTo || 0;
             return {
                 borderDash: function(ctx) {
-                    return ctx.p0DataIndex >= projectedFrom - 1 ? [6, 3] : undefined;
+                    // Leading projection: dash segments before first real data
+                    if (hasLeading && ctx.p0DataIndex < leadEnd) return [6, 3];
+                    // Trailing projection: dash segments from last real to projected
+                    if (hasTrailing && ctx.p0DataIndex >= projectedFrom - 1) return [6, 3];
+                    return undefined;
                 }
             };
         }
@@ -745,9 +1053,11 @@
             history.replaceState(null, '', '#' + tabName);
 
             // Lazy-render charts when switching to a tab
+            if (tabName === 'installs' && charts['installsChart']) charts['installsChart'].resize();
             if (tabName === 'views' && currentState) renderViewsTab();
             if (tabName === 'community' && currentState) renderCommunityTab();
             if (tabName === 'overview' && currentState) renderOverviewChart();
+            if (tabName === 'dev' && currentState) renderDevTab();
         }
 
         // ==================== MAIN ENTRY POINT ====================
@@ -784,10 +1094,13 @@
                 hide('loading');
                 show('content');
 
-                // Check URL hash for initial tab
+                // Check URL hash for initial tab (default: overview)
                 var hash = window.location.hash.replace('#', '');
-                if (['views', 'community', 'overview'].indexOf(hash) !== -1) {
+                if (['installs', 'views', 'community', 'overview', 'dev'].indexOf(hash) !== -1) {
                     switchTab(hash);
+                } else {
+                    // Default to Overview — render it since it's the active tab
+                    renderOverviewChart();
                 }
             } catch (err) {
                 hide('loading');
@@ -800,7 +1113,7 @@
 
         function renderInstallsTab(state) {
             var totalDl = state.totalDownloads || 0;
-            var totalCl = state.totalClones || 0;
+            var totalCl = Math.max(0, (state.totalClones || 0) - (state.totalCiCheckouts || 0));
             var combined = totalDl + totalCl;
 
             setText('total-installs', fmt(combined));
@@ -811,10 +1124,12 @@
             var clPct = combined > 0 ? ((totalCl / combined) * 100).toFixed(1) : '0';
             setText('downloads-pct', dlPct + '% of total');
             setText('clones-pct', clPct + '% of total');
+            setText('clones-unique', fmt(state.totalOrganicUniqueClones || state.totalUniqueClones || 0) + ' tracked unique');
 
-            // Recent activity (cascading)
+            // Recent activity (cascading, organic only)
             var history = state.dailyHistory || [];
-            var last24h = history.length > 0 ? (history[history.length - 1].total || 0) : 0;
+            var lastEntry = history.length > 0 ? history[history.length - 1] : {};
+            var last24h = (lastEntry.organicClones !== undefined ? lastEntry.organicClones : (lastEntry.clones || 0)) + (lastEntry.downloads || 0);
             var lastWeek = sumWindow(history, 7);
             var lastMonth = sumWindow(history, 31);
 
@@ -863,9 +1178,16 @@
             }
 
             var labels = history.map(function(d) { return formatDate(d.date); });
-            var totals = history.map(function(d) { return d.total || 0; });
-            var clones = history.map(function(d) { return d.clones || 0; });
-            var downloads = history.map(function(d) { return d.downloads || 0; });
+            var dates = history.map(function(d) { return d.date; });
+            var clonesProj = projectTrailingZeros(history.map(function(d) { return d.organicClones !== undefined ? d.organicClones : (d.clones || 0); }), dates);
+            var uniqueClonesProj = projectTrailingZeros(history.map(function(d) { return getOrganicUniqueClones(d); }), dates);
+            var downloadsProj = projectTrailingZeros(history.map(function(d) { return d.downloads || 0; }), dates);
+            var clones = clonesProj.data;
+            var uniqueClones = uniqueClonesProj.data;
+            var downloads = downloadsProj.data;
+            var totals = clones.map(function(c, i) { return c + downloads[i]; });
+            var projectedFrom = Math.min(clonesProj.projectedFrom, downloadsProj.projectedFrom);
+            var projectedTo = Math.max(clonesProj.projectedTo, downloadsProj.projectedTo);
 
             // Check if any line matches the total exactly at every point
             // If so, render total as area-only (no top line) so the matching line stays visible
@@ -894,6 +1216,7 @@
                             pointRadius: totalBorderWidth > 0 ? pointSize : 0,
                             pointHoverRadius: totalBorderWidth > 0 ? pointSize + 2 : 0,
                             borderWidth: totalBorderWidth,
+                            segment: projectionSegmentConfig(projectedFrom, totals.length, projectedTo),
                             order: 2  // render behind lines
                         },
                         {
@@ -903,10 +1226,25 @@
                             backgroundColor: 'transparent',
                             fill: false,
                             tension: 0.3,
+                            pointRadius: 1,
+                            pointHoverRadius: 3,
+                            borderWidth: 1.5,
+                            borderDash: [4, 2],
+                            segment: projectionSegmentConfig(clonesProj.projectedFrom, clones.length, clonesProj.projectedTo),
+                            order: 1
+                        },
+                        {
+                            label: 'Unique Clones',
+                            data: uniqueClones,
+                            borderColor: '#d4b8ff',
+                            backgroundColor: 'transparent',
+                            fill: false,
+                            tension: 0.3,
                             pointRadius: smallPoint,
                             pointHoverRadius: smallPoint + 2,
                             borderWidth: 2,
-                            order: 1  // render on top
+                            segment: projectionSegmentConfig(uniqueClonesProj.projectedFrom, uniqueClones.length, uniqueClonesProj.projectedTo),
+                            order: 1
                         },
                         {
                             label: 'Downloads',
@@ -918,6 +1256,7 @@
                             pointRadius: smallPoint,
                             pointHoverRadius: smallPoint + 2,
                             borderWidth: 2,
+                            segment: projectionSegmentConfig(downloadsProj.projectedFrom, downloads.length, downloadsProj.projectedTo),
                             order: 1
                         }
                     ]
@@ -1055,13 +1394,16 @@
             var referrers = state.referrers || [];
 
             setText('total-views', fmt(totalViews));
+            setText('total-views-unique', fmt(state.totalUniqueViews || 0) + ' unique visitors');
 
             // Find latest day with real view data (skip trailing zeros = no data yet)
             var todayViews = 0;
+            var todayUniqueViews = 0;
             var todayLabel = 'latest data point';
             for (var i = history.length - 1; i >= 0; i--) {
                 if ((history[i].views || 0) > 0) {
                     todayViews = history[i].views;
+                    todayUniqueViews = history[i].uniqueViews || 0;
                     if (i < history.length - 1) {
                         todayLabel = formatDate(history[i].date);
                     }
@@ -1069,7 +1411,7 @@
                 }
             }
             setText('today-views', fmt(todayViews));
-            document.getElementById('today-views').parentElement.querySelector('.card-sub').textContent = todayLabel;
+            setText('today-views-sub', todayLabel + (todayUniqueViews > 0 ? ' · ' + fmt(todayUniqueViews) + ' unique' : ''));
 
             var weekViews = sumWindow(history, 7, 'views');
             setText('week-views', fmt(weekViews));
@@ -1087,6 +1429,9 @@
 
             // Referrers table
             renderReferrersTable(referrers);
+
+            // Popular pages table
+            renderPopularPaths(state.popularPaths || []);
         }
 
         function renderViewsChart(history) {
@@ -1094,8 +1439,11 @@
             if (history.length === 0) return;
 
             var labels = history.map(function(d) { return formatDate(d.date); });
+            var dates = history.map(function(d) { return d.date; });
             var viewsRaw = history.map(function(d) { return d.views || 0; });
-            var proj = projectTrailingZeros(viewsRaw);
+            var uniqueViewsRaw = history.map(function(d) { return d.uniqueViews !== undefined ? d.uniqueViews : null; });
+            var proj = projectTrailingZeros(viewsRaw, dates);
+            var uniqueProj = projectTrailingZeros(uniqueViewsRaw, dates);
             var hasProjection = proj.projectedFrom < proj.data.length;
 
             setText('views-chart-note', '(' + history.length + ' days)');
@@ -1110,25 +1458,64 @@
                 backgroundColor: 'rgba(88, 166, 255, 0.1)',
                 fill: true,
                 tension: 0.3,
-                pointRadius: function(ctx) {
-                    return hasProjection && ctx.dataIndex >= proj.projectedFrom ? 4 : 3;
-                },
-                pointStyle: function(ctx) {
-                    return hasProjection && ctx.dataIndex >= proj.projectedFrom ? 'rectRot' : 'circle';
-                },
-                pointHoverRadius: 5,
-                borderWidth: 2
+                pointRadius: 1,
+                pointHoverRadius: 3,
+                borderWidth: 1.5,
+                borderDash: [4, 2]
             };
 
-            if (hasProjection) {
-                dataset.segment = projectionSegmentConfig(proj.projectedFrom, proj.data.length);
-            }
+            dataset.segment = projectionSegmentConfig(proj.projectedFrom, proj.data.length, proj.projectedTo);
+
+            var uniqueDataset = {
+                label: 'Unique Views',
+                data: uniqueProj.data,
+                borderColor: '#8ec5ff',
+                backgroundColor: 'transparent',
+                fill: false,
+                tension: 0.3,
+                pointRadius: function(ctx) {
+                    return hasProjection && ctx.dataIndex >= uniqueProj.projectedFrom ? 4 : 3;
+                },
+                pointStyle: function(ctx) {
+                    return hasProjection && ctx.dataIndex >= uniqueProj.projectedFrom ? 'rectRot' : 'circle';
+                },
+                pointHoverRadius: 5,
+                borderWidth: 2,
+                segment: projectionSegmentConfig(uniqueProj.projectedFrom, uniqueProj.data.length, uniqueProj.projectedTo),
+                order: 1
+            };
 
             charts['viewsChart'] = new Chart(ctx, {
                 type: 'line',
-                data: { labels: labels, datasets: [dataset] },
+                data: { labels: labels, datasets: [dataset, uniqueDataset] },
                 options: buildChartOptions()
             });
+        }
+
+        // Known mobile app / platform referrer patterns
+        var REFERRER_ANNOTATIONS = {
+            'com.reddit.frontpage': 'Reddit mobile app',
+            'com.google.android.googlequicksearchbox': 'Google app (Android)',
+            'com.twitter.android': 'Twitter/X app (Android)',
+            'org.telegram.messenger': 'Telegram app',
+            'com.slack': 'Slack app',
+            'com.discord': 'Discord app',
+            'com.linkedin.android': 'LinkedIn app (Android)',
+            'm.facebook.com': 'Facebook mobile',
+            'l.facebook.com': 'Facebook link shim',
+            'lm.facebook.com': 'Facebook mobile link',
+            't.co': 'Twitter/X link shortener',
+            'out.reddit.com': 'Reddit outbound link'
+        };
+
+        function getReferrerAnnotation(source) {
+            var lower = source.toLowerCase();
+            if (REFERRER_ANNOTATIONS[lower]) return REFERRER_ANNOTATIONS[lower];
+            // Generic mobile app detection (Android package names)
+            if (/^com\.|^org\.|^net\./.test(lower) && lower.indexOf('.') > 0 && lower.split('.').length >= 3) {
+                return 'mobile app';
+            }
+            return null;
         }
 
         function renderReferrersTable(referrers) {
@@ -1141,11 +1528,81 @@
             for (var i = 0; i < referrers.length; i++) {
                 var r = referrers[i];
                 var barWidth = Math.max(4, (r.count / maxCount) * 100);
+                var annotation = getReferrerAnnotation(r.source);
                 html += '<tr>';
                 html += '<td class="rank">' + (i + 1) + '</td>';
-                html += '<td>' + escapeHtml(r.source) + '<div class="referrer-bar" style="width:' + barWidth + '%"></div></td>';
+                html += '<td>' + escapeHtml(r.source);
+                if (annotation) {
+                    html += ' <span style="color: var(--text-secondary); font-size: 0.75rem; font-style: italic;">(' + escapeHtml(annotation) + ')</span>';
+                }
+                html += '<div class="referrer-bar" style="width:' + barWidth + '%"></div></td>';
                 html += '<td>' + fmt(r.count) + '</td>';
                 html += '<td>' + fmt(r.uniques) + '</td>';
+                html += '</tr>';
+            }
+
+            tbody.innerHTML = html;
+        }
+
+        function renderPopularPaths(paths) {
+            var tbody = document.getElementById('paths-body');
+            if (!paths || paths.length === 0) return;
+
+            // Detect repo prefix to strip from paths (e.g. "/Owner/Repo-Name")
+            var repoPrefix = '';
+            if (paths.length > 0) {
+                var parts = paths[0].path.split('/').filter(Boolean);
+                if (parts.length >= 2) {
+                    repoPrefix = '/' + parts[0] + '/' + parts[1];
+                }
+            }
+
+            var maxCount = paths[0].count || 1;
+            var html = '';
+
+            for (var i = 0; i < paths.length; i++) {
+                var p = paths[i];
+                var barWidth = Math.max(4, (p.count / maxCount) * 100);
+
+                // Clean path: strip repo prefix
+                var cleanPath = p.path;
+                if (repoPrefix && cleanPath.indexOf(repoPrefix) === 0) {
+                    cleanPath = cleanPath.slice(repoPrefix.length) || '/';
+                }
+
+                // Use API title as label (cleaned), fall back to path-derived name
+                var title = (p.title || '')
+                    .replace(/\u00c3\u201a\u00c2\u00b7/g, ' - ')  // Fix triple-encoded middot (Ã‚·)
+                    .replace(/\u00c2\u00b7/g, '\u00b7')            // Fix double-encoded middot (Â·)
+                    .replace(/\s*\u00b7\s*/g, ' - ')               // Replace middot separators with dash
+                    .replace(/\.\.\.$/, '')                 // Strip trailing ellipsis
+                    .trim();
+
+                // For root path or if title is empty/generic, use friendly name
+                var label;
+                if (cleanPath === '/') {
+                    label = 'Repository Home';
+                } else if (title && title.length > 0) {
+                    label = title;
+                } else {
+                    label = cleanPath;
+                }
+
+                // Only show path subtext when it adds info (label is a title, not the path itself)
+                var showPath = label !== cleanPath && cleanPath !== '/';
+
+                html += '<tr>';
+                html += '<td class="rank">' + (i + 1) + '</td>';
+                var pageUrl = 'https://github.com' + p.path;
+                html += '<td title="' + escapeHtml(p.path) + '">';
+                html += '<a href="' + escapeHtml(pageUrl) + '" target="_blank" style="color: var(--accent-blue); text-decoration: none;">' + escapeHtml(label) + '</a>';
+                if (showPath) {
+                    html += '<div class="path-text">' + escapeHtml(cleanPath) + '</div>';
+                }
+                html += '<div class="referrer-bar" style="width:' + barWidth + '%"></div>';
+                html += '</td>';
+                html += '<td>' + fmt(p.count) + '</td>';
+                html += '<td>' + fmt(p.uniques) + '</td>';
                 html += '</tr>';
             }
 
@@ -1425,38 +1882,45 @@
             if (history.length === 0) return;
             if (typeof Chart === 'undefined') return;
 
-            // Update summary cards
-            var combined = (state.totalDownloads || 0) + (state.totalClones || 0);
+            // Update summary cards (organic clones only)
+            var combined = (state.totalDownloads || 0) + Math.max(0, (state.totalClones || 0) - (state.totalCiCheckouts || 0));
             setText('ov-installs', fmt(combined));
             setText('ov-views', fmt(state.totalViews || 0));
+            setText('ov-installs-unique', fmt(state.totalOrganicUniqueClones || state.totalUniqueClones || 0) + ' tracked unique cloners');
+            setText('ov-views-unique', fmt(state.totalUniqueViews || 0) + ' unique viewers');
             setText('ov-stars', fmt(state.stars || 0));
             setText('ov-forks', fmt(state.forks || 0));
 
             var labels = history.map(function(d) { return formatDate(d.date); });
+            var dates = history.map(function(d) { return d.date; });
             var datasets = [];
 
             var showViews = document.getElementById('ov-toggle-views').checked;
             var showClones = document.getElementById('ov-toggle-clones').checked;
             var showDownloads = document.getElementById('ov-toggle-downloads').checked;
             var showInstalls = document.getElementById('ov-toggle-installs').checked;
+            var showUniqueClones = document.getElementById('ov-toggle-unique-clones').checked;
+            var showUniqueViews = document.getElementById('ov-toggle-unique-views').checked;
 
             if (showInstalls) {
+                var installsProj = projectTrailingZeros(history.map(function(d) { return (d.organicClones !== undefined ? d.organicClones : (d.clones || 0)) + (d.downloads || 0); }), dates);
                 datasets.push({
                     label: 'Total Installs',
-                    data: history.map(function(d) { return d.total || 0; }),
+                    data: installsProj.data,
                     borderColor: 'transparent',
                     backgroundColor: 'rgba(88, 166, 255, 0.12)',
                     fill: true,
                     tension: 0.3,
                     pointRadius: 0,
                     borderWidth: 0,
+                    segment: projectionSegmentConfig(installsProj.projectedFrom, installsProj.data.length, installsProj.projectedTo),
                     order: 3
                 });
             }
 
             if (showViews) {
                 var viewsRaw = history.map(function(d) { return d.views || 0; });
-                var viewsProj = projectTrailingZeros(viewsRaw);
+                var viewsProj = projectTrailingZeros(viewsRaw, dates);
                 var viewsDs = {
                     label: 'Views',
                     data: viewsProj.data,
@@ -1464,36 +1928,42 @@
                     backgroundColor: 'transparent',
                     fill: false,
                     tension: 0.3,
-                    pointRadius: 2,
-                    pointHoverRadius: 4,
-                    borderWidth: 2,
+                    pointRadius: 1,
+                    pointHoverRadius: 3,
+                    borderWidth: 1.5,
+                    borderDash: [4, 2],
                     order: 1
                 };
-                if (viewsProj.projectedFrom < viewsProj.data.length) {
-                    viewsDs.segment = projectionSegmentConfig(viewsProj.projectedFrom, viewsProj.data.length);
-                }
+                viewsDs.segment = projectionSegmentConfig(viewsProj.projectedFrom, viewsProj.data.length, viewsProj.projectedTo);
                 datasets.push(viewsDs);
             }
 
             if (showClones) {
-                datasets.push({
+                var clonesRaw = history.map(function(d) { return d.organicClones !== undefined ? d.organicClones : (d.clones || 0); });
+                var clonesProj = projectTrailingZeros(clonesRaw, dates);
+                var clonesDs = {
                     label: 'Clones',
-                    data: history.map(function(d) { return d.clones || 0; }),
+                    data: clonesProj.data,
                     borderColor: '#bc8cff',
                     backgroundColor: 'transparent',
                     fill: false,
                     tension: 0.3,
-                    pointRadius: 2,
-                    pointHoverRadius: 4,
-                    borderWidth: 2,
+                    pointRadius: 1,
+                    pointHoverRadius: 3,
+                    borderWidth: 1.5,
+                    borderDash: [4, 2],
+                    segment: projectionSegmentConfig(clonesProj.projectedFrom, clonesProj.data.length, clonesProj.projectedTo),
                     order: 1
-                });
+                };
+                datasets.push(clonesDs);
             }
 
             if (showDownloads) {
-                datasets.push({
+                var downloadsRaw = history.map(function(d) { return d.downloads || 0; });
+                var downloadsProj = projectTrailingZeros(downloadsRaw, dates);
+                var downloadsDs = {
                     label: 'Downloads',
-                    data: history.map(function(d) { return d.downloads || 0; }),
+                    data: downloadsProj.data,
                     borderColor: '#3fb950',
                     backgroundColor: 'transparent',
                     fill: false,
@@ -1501,6 +1971,44 @@
                     pointRadius: 2,
                     pointHoverRadius: 4,
                     borderWidth: 2,
+                    segment: projectionSegmentConfig(downloadsProj.projectedFrom, downloadsProj.data.length, downloadsProj.projectedTo),
+                    order: 1
+                };
+                datasets.push(downloadsDs);
+            }
+
+            if (showUniqueClones) {
+                var uClonesRaw = history.map(function(d) { return getOrganicUniqueClones(d); });
+                var uClonesProj = projectTrailingZeros(uClonesRaw, dates);
+                datasets.push({
+                    label: 'Unique Clones',
+                    data: uClonesProj.data,
+                    borderColor: '#d4b8ff',
+                    backgroundColor: 'transparent',
+                    fill: false,
+                    tension: 0.3,
+                    pointRadius: 2,
+                    pointHoverRadius: 4,
+                    borderWidth: 2,
+                    segment: projectionSegmentConfig(uClonesProj.projectedFrom, uClonesProj.data.length, uClonesProj.projectedTo),
+                    order: 1
+                });
+            }
+
+            if (showUniqueViews) {
+                var uViewsRaw = history.map(function(d) { return d.uniqueViews !== undefined ? d.uniqueViews : null; });
+                var uViewsProj = projectTrailingZeros(uViewsRaw, dates);
+                datasets.push({
+                    label: 'Unique Views',
+                    data: uViewsProj.data,
+                    borderColor: '#8ec5ff',
+                    backgroundColor: 'transparent',
+                    fill: false,
+                    tension: 0.3,
+                    pointRadius: 2,
+                    pointHoverRadius: 4,
+                    borderWidth: 2,
+                    segment: projectionSegmentConfig(uViewsProj.projectedFrom, uViewsProj.data.length, uViewsProj.projectedTo),
                     order: 1
                 });
             }
@@ -1515,6 +2023,635 @@
             });
 
             overviewRendered = true;
+        }
+
+        // ==================== DEV TAB ====================
+
+        var devRendered = false;
+        var devStatsCache = {};  // sessionStorage-backed cache for GitHub stats API
+
+        function renderDevTab() {
+            if (devRendered) return;
+            devRendered = true;
+
+            var state = currentState;
+            var history = state.dailyHistory || [];
+
+            // --- Summary Cards ---
+            var rawClones = state.totalClones || 0;
+            var ciCheckouts = state.totalCiCheckouts || 0;
+            var organicClones = Math.max(0, rawClones - ciCheckouts);
+
+            // CI rate: compute only from tracked period (entries with organicClones field)
+            // totalClones includes a ~1000 base approximation from before proper tracking
+            var trackedRaw = 0;
+            var trackedCi = 0;
+            for (var t = 0; t < history.length; t++) {
+                if (history[t].organicClones !== undefined) {
+                    trackedRaw += (history[t].clones || 0);
+                    trackedCi += (history[t].ciCheckouts || 0);
+                }
+            }
+            var ciRate = trackedRaw > 0 ? ((trackedCi / trackedRaw) * 100).toFixed(1) : '0.0';
+
+            setText('dev-raw-clones', fmt(rawClones));
+            setText('dev-ci-checkouts', fmt(ciCheckouts));
+            setText('dev-organic-clones', fmt(organicClones));
+            setText('dev-unique-clones', fmt(state.totalUniqueClones || 0) + ' unique cloners');
+            setText('dev-ci-rate', ciRate + '% of tracked');
+
+            // --- Data Freshness ---
+            var lastCapture = null;
+            for (var i = history.length - 1; i >= 0; i--) {
+                if (history[i].capturedAt) {
+                    lastCapture = new Date(history[i].capturedAt);
+                    break;
+                }
+            }
+            if (lastCapture) {
+                var hoursAgo = Math.floor((Date.now() - lastCapture.getTime()) / (1000 * 60 * 60));
+                setText('dev-freshness', hoursAgo < 1 ? '<1h ago' : hoursAgo + 'h ago');
+                setText('dev-capture-time', lastCapture.toISOString().replace('T', ' ').slice(0, 19) + ' UTC');
+                var dot = document.getElementById('dev-health-dot');
+                dot.className = hoursAgo < 30 ? 'dot active' : (hoursAgo < 48 ? 'dot warning' : 'dot inactive');
+            } else {
+                setText('dev-freshness', 'N/A');
+                setText('dev-capture-time', 'no capturedAt data');
+            }
+
+            // --- Raw vs Organic Chart ---
+            renderDevChart(history);
+
+            // --- CI Breakdown Table ---
+            renderCiTable(state.ciCheckouts || {});
+
+            // --- Client-side GitHub Statistics ---
+            fetchDevStatistics();
+        }
+
+        function renderDevChart(history) {
+            if (typeof Chart === 'undefined' || history.length === 0) return;
+
+            var labels = history.map(function(d) { return formatDate(d.date); });
+            var dates = history.map(function(d) { return d.date; });
+            var rawLine = history.map(function(d) { return d.clones || 0; });
+            var organicLine = history.map(function(d) {
+                return d.organicClones !== undefined ? d.organicClones : (d.clones || 0);
+            });
+            var rawUniqueLine = history.map(function(d) { return d.uniqueClones !== undefined ? d.uniqueClones : null; });
+            var organicUniqueLine = history.map(function(d) { return getOrganicUniqueClones(d); });
+
+            var rawProj = projectTrailingZeros(rawLine, dates);
+            var organicProj = projectTrailingZeros(organicLine, dates);
+            var rawUniqueProj = projectTrailingZeros(rawUniqueLine, dates);
+            var organicUniqueProj = projectTrailingZeros(organicUniqueLine, dates);
+
+            destroyChart('devChart');
+            var ctx = document.getElementById('devChart').getContext('2d');
+
+            charts['devChart'] = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: 'Raw Clones',
+                            data: rawProj.data,
+                            borderColor: '#d29922',
+                            backgroundColor: 'rgba(210, 153, 34, 0.08)',
+                            fill: true,
+                            tension: 0.3,
+                            pointRadius: 2,
+                            pointHoverRadius: 4,
+                            borderWidth: 2,
+                            segment: projectionSegmentConfig(rawProj.projectedFrom, rawProj.data.length, rawProj.projectedTo),
+                            order: 4
+                        },
+                        {
+                            label: 'Organic Clones',
+                            data: organicProj.data,
+                            borderColor: '#3fb950',
+                            backgroundColor: 'transparent',
+                            fill: false,
+                            tension: 0.3,
+                            pointRadius: 2,
+                            pointHoverRadius: 4,
+                            borderWidth: 2,
+                            segment: projectionSegmentConfig(organicProj.projectedFrom, organicProj.data.length, organicProj.projectedTo),
+                            order: 3
+                        },
+                        {
+                            label: 'Raw Unique Clones',
+                            data: rawUniqueProj.data,
+                            borderColor: '#d4b8ff',
+                            backgroundColor: 'transparent',
+                            fill: false,
+                            tension: 0.3,
+                            pointRadius: 1,
+                            pointHoverRadius: 3,
+                            borderWidth: 1.5,
+                            borderDash: [4, 2],
+                            segment: projectionSegmentConfig(rawUniqueProj.projectedFrom, rawUniqueProj.data.length, rawUniqueProj.projectedTo),
+                            order: 2
+                        },
+                        {
+                            label: 'Organic Unique Clones',
+                            data: organicUniqueProj.data,
+                            borderColor: '#d4b8ff',
+                            backgroundColor: 'transparent',
+                            fill: false,
+                            tension: 0.3,
+                            pointRadius: 2,
+                            pointHoverRadius: 4,
+                            borderWidth: 2,
+                            segment: projectionSegmentConfig(organicUniqueProj.projectedFrom, organicUniqueProj.data.length, organicUniqueProj.projectedTo),
+                            order: 1
+                        }
+                    ]
+                },
+                options: buildChartOptions()
+            });
+        }
+
+        function renderCiTable(ciMap) {
+            var ciDates = Object.keys(ciMap).sort().reverse();
+            if (ciDates.length === 0) return;
+
+            // Filter to only days with actual CI activity
+            var activeDays = [];
+            var zeroDays = [];
+            for (var j = 0; j < ciDates.length; j++) {
+                var entry = ciMap[ciDates[j]];
+                if (entry.total > 0) {
+                    activeDays.push(ciDates[j]);
+                } else {
+                    zeroDays.push(ciDates[j]);
+                }
+            }
+
+            if (activeDays.length === 0) return; // all zeros — keep default "no data" message
+
+            var tbody = document.getElementById('ci-breakdown-body');
+            var html = '';
+
+            for (var j = 0; j < activeDays.length; j++) {
+                var d = activeDays[j];
+                var entry = ciMap[d];
+                var wfParts = [];
+                if (entry.byWorkflow) {
+                    for (var wf in entry.byWorkflow) {
+                        var info = entry.byWorkflow[wf];
+                        var perRun = info.checkoutsPerRun ? info.checkoutsPerRun.join('+') : '?';
+                        wfParts.push(escapeHtml(wf) + ': ' + info.runs + ' run' + (info.runs > 1 ? 's' : '') + ' (' + perRun + ')');
+                    }
+                }
+                html += '<tr>';
+                html += '<td>' + formatDate(d) + '</td>';
+                html += '<td>' + entry.total + '</td>';
+                html += '<td style="font-size: 0.8rem;">' + wfParts.join('; ') + '</td>';
+                html += '</tr>';
+            }
+
+            // Summary of quiet days
+            if (zeroDays.length > 0) {
+                var newest = formatDate(zeroDays[0]);
+                var oldest = formatDate(zeroDays[zeroDays.length - 1]);
+                var quietLabel = zeroDays.length === 1
+                    ? 'No CI activity on ' + newest
+                    : 'No CI activity: ' + oldest + ' – ' + newest + ' (' + zeroDays.length + ' days)';
+                html += '<tr><td colspan="3" style="color: var(--text-secondary); font-size: 0.8rem; text-align: center; padding: 0.5rem;">' + quietLabel + '</td></tr>';
+            }
+
+            tbody.innerHTML = html;
+        }
+
+        // --- Client-side GitHub Statistics API ---
+
+        var STATS_API_BASE = 'https://api.github.com/repos/' + REPO_OWNER + '/' + REPO_NAME + '/stats/';
+
+        function getCachedStats(key) {
+            try {
+                var cached = sessionStorage.getItem('dev_stats_' + key);
+                if (cached) return JSON.parse(cached);
+            } catch (e) {}
+            return null;
+        }
+
+        function setCachedStats(key, data) {
+            try {
+                sessionStorage.setItem('dev_stats_' + key, JSON.stringify(data));
+            } catch (e) {}
+        }
+
+        async function fetchStatsEndpoint(endpoint) {
+            var cached = getCachedStats(endpoint);
+            if (cached) return cached;
+
+            // GitHub stats endpoints may return 202 (computing) on first request.
+            // Cold starts can take up to 30 seconds, so we retry with increasing delays.
+            var delays = [2000, 4000, 6000, 8000, 10000];
+            for (var attempt = 0; attempt < delays.length; attempt++) {
+                try {
+                    var response = await fetch(STATS_API_BASE + endpoint);
+                    if (response.status === 202) {
+                        await new Promise(function(r) { setTimeout(r, delays[attempt]); });
+                        continue;
+                    }
+                    if (!response.ok) return null;
+                    var data = await response.json();
+                    // Guard against empty objects (GitHub sometimes returns {} instead of [])
+                    if (data && typeof data === 'object' && !Array.isArray(data) && Object.keys(data).length === 0) {
+                        await new Promise(function(r) { setTimeout(r, delays[attempt]); });
+                        continue;
+                    }
+                    setCachedStats(endpoint, data);
+                    return data;
+                } catch (e) {
+                    return null;
+                }
+            }
+            return null;
+        }
+
+        function setStatsStatus(id, state) {
+            var el = document.getElementById(id);
+            if (!el) return;
+            if (state === 'done') {
+                el.style.display = 'none';
+            } else if (state === 'error') {
+                el.className = 'stats-error';
+                el.innerHTML = 'GitHub is still computing this data. Refresh to try again.';
+            }
+        }
+
+        async function fetchDevStatistics() {
+            // Fetch all 5 statistics endpoints in parallel, render each as it arrives
+            // (contributors can take 30s+ on cold starts — don't block other charts)
+            fetchStatsEndpoint('commit_activity').then(function(d) {
+                if (d) { renderCommitActivity(d); setStatsStatus('commit-status', 'done'); }
+                else setStatsStatus('commit-status', 'error');
+            });
+            fetchStatsEndpoint('code_frequency').then(function(d) {
+                if (d) { renderCodeFrequency(d); setStatsStatus('codefreq-status', 'done'); }
+                else setStatsStatus('codefreq-status', 'error');
+            });
+            fetchStatsEndpoint('contributors').then(function(d) {
+                if (d) {
+                    renderContributors(d);
+                    if (d.length > 0 && d[0].author) primaryAuthor = d[0].author.login;
+                    setStatsStatus('contributors-status', 'done');
+                } else {
+                    setStatsStatus('contributors-status', 'error');
+                }
+            });
+            fetchStatsEndpoint('participation').then(function(d) {
+                if (d) { renderParticipation(d); setStatsStatus('participation-status', 'done'); }
+                else setStatsStatus('participation-status', 'error');
+            });
+            fetchStatsEndpoint('punch_card').then(function(d) {
+                if (d) { renderPunchCard(d); setStatsStatus('punchcard-status', 'done'); }
+                else setStatsStatus('punchcard-status', 'error');
+            });
+        }
+
+        // Store week timestamps for clickable bars
+        var commitWeeks = [];
+
+        function renderCommitActivity(data) {
+            if (typeof Chart === 'undefined' || !data || data.length === 0) return;
+
+            // data = array of { total, week (unix timestamp), days: [Sun..Sat] }
+            // Trim weeks that predate repo creation (API always returns 52 weeks)
+            var createdTs = new Date(REPO_CREATED + 'T00:00:00Z').getTime() / 1000;
+            data = data.filter(function(w) { return w.week >= createdTs; });
+            if (data.length === 0) return;
+
+            commitWeeks = data.map(function(w) { return w.week; });
+            var labels = data.map(function(w) {
+                var d = new Date(w.week * 1000);
+                return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+            });
+            var totals = data.map(function(w) { return w.total; });
+
+            destroyChart('commitChart');
+            var ctx = document.getElementById('commitChart').getContext('2d');
+
+            charts['commitChart'] = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Commits',
+                        data: totals,
+                        backgroundColor: 'rgba(88, 166, 255, 0.6)',
+                        borderColor: '#58a6ff',
+                        borderWidth: 1,
+                        borderRadius: 2
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    onClick: function(event, elements) {
+                        if (elements.length === 0) return;
+                        var idx = elements[0].index;
+                        var weekStart = new Date(commitWeeks[idx] * 1000);
+                        var weekEnd = new Date(weekStart.getTime() + 6 * 24 * 60 * 60 * 1000);
+                        var since = weekStart.toISOString().slice(0, 10);
+                        var until = weekEnd.toISOString().slice(0, 10);
+                        window.open('https://github.com/' + REPO_OWNER + '/' + REPO_NAME + '/commits?since=' + since + '&until=' + until, '_blank');
+                    },
+                    scales: {
+                        x: {
+                            ticks: { color: '#8b949e', maxRotation: 45, autoSkip: true, maxTicksLimit: 20 },
+                            grid: { color: '#30363d' }
+                        },
+                        y: {
+                            beginAtZero: true,
+                            ticks: { color: '#8b949e', precision: 0 },
+                            grid: { color: '#30363d' }
+                        }
+                    },
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            backgroundColor: '#161b22',
+                            titleColor: '#e6edf3',
+                            bodyColor: '#8b949e',
+                            borderColor: '#30363d',
+                            borderWidth: 1,
+                            callbacks: {
+                                afterLabel: function() { return 'Click to view commits'; }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        function renderCodeFrequency(data) {
+            if (typeof Chart === 'undefined' || !data || data.length === 0) return;
+
+            // data = array of [week_unix, additions, deletions]
+            var labels = data.map(function(w) {
+                var d = new Date(w[0] * 1000);
+                return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+            });
+            var additions = data.map(function(w) { return w[1]; });
+            var deletions = data.map(function(w) { return Math.abs(w[2]); });
+
+            destroyChart('codeFreqChart');
+            var ctx = document.getElementById('codeFreqChart').getContext('2d');
+
+            charts['codeFreqChart'] = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: 'Additions',
+                            data: additions,
+                            backgroundColor: 'rgba(63, 185, 80, 0.6)',
+                            borderColor: '#3fb950',
+                            borderWidth: 1,
+                            borderRadius: 2
+                        },
+                        {
+                            label: 'Deletions',
+                            data: deletions,
+                            backgroundColor: 'rgba(248, 81, 73, 0.6)',
+                            borderColor: '#f85149',
+                            borderWidth: 1,
+                            borderRadius: 2
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        x: {
+                            stacked: true,
+                            ticks: { color: '#8b949e', maxRotation: 45, autoSkip: true, maxTicksLimit: 20 },
+                            grid: { color: '#30363d' }
+                        },
+                        y: {
+                            stacked: true,
+                            beginAtZero: true,
+                            ticks: { color: '#8b949e', precision: 0 },
+                            grid: { color: '#30363d' }
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            labels: { color: '#e6edf3', usePointStyle: true, pointStyle: 'circle' }
+                        },
+                        tooltip: {
+                            backgroundColor: '#161b22',
+                            titleColor: '#e6edf3',
+                            bodyColor: '#8b949e',
+                            borderColor: '#30363d',
+                            borderWidth: 1
+                        }
+                    }
+                }
+            });
+        }
+
+        // Store week dates for clickable participation bars
+        var participationWeekDates = [];
+
+        function renderParticipation(data) {
+            if (typeof Chart === 'undefined' || !data) return;
+
+            // data = { all: [52 weeks], owner: [52 weeks] }
+            // Note: For org-owned repos, "owner" = the org account (which never commits),
+            // so owner is all zeros and all commits appear as "community".
+            // We label as "Maintainer" vs "Community" for clarity.
+            var allCommits = data.all || [];
+            var ownerCommits = data.owner || [];
+            var communityCommits = allCommits.map(function(a, i) { return Math.max(0, a - (ownerCommits[i] || 0)); });
+
+            // Generate week labels aligned to Sunday UTC boundaries
+            // (GitHub stats weeks always start on Sunday 00:00 UTC)
+            var labels = [];
+            participationWeekDates = [];
+            var now = new Date();
+            var utcDay = now.getUTCDay(); // 0=Sunday
+            var currentSunday = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - utcDay));
+            var createdMs = new Date(REPO_CREATED + 'T00:00:00Z').getTime();
+
+            // Build all week dates first, then trim pre-creation weeks
+            var allWeekDates = [];
+            for (var i = 0; i < allCommits.length; i++) {
+                allWeekDates.push(new Date(currentSunday.getTime() - ((allCommits.length - 1 - i) * 7 * 24 * 60 * 60 * 1000)));
+            }
+
+            // Find first week at or after repo creation
+            var startIdx = 0;
+            for (var i = 0; i < allWeekDates.length; i++) {
+                if (allWeekDates[i].getTime() >= createdMs) { startIdx = i; break; }
+            }
+
+            // Trim arrays to post-creation range
+            allCommits = allCommits.slice(startIdx);
+            ownerCommits = ownerCommits.slice(startIdx);
+            communityCommits = communityCommits.slice(startIdx);
+
+            for (var i = startIdx; i < allWeekDates.length; i++) {
+                labels.push(allWeekDates[i].toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' }));
+                participationWeekDates.push(allWeekDates[i]);
+            }
+
+            destroyChart('participationChart');
+            var ctx = document.getElementById('participationChart').getContext('2d');
+
+            charts['participationChart'] = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: 'Maintainer',
+                            data: ownerCommits,
+                            backgroundColor: 'rgba(188, 140, 255, 0.6)',
+                            borderColor: '#bc8cff',
+                            borderWidth: 1,
+                            borderRadius: 2
+                        },
+                        {
+                            label: 'Community',
+                            data: communityCommits,
+                            backgroundColor: 'rgba(88, 166, 255, 0.4)',
+                            borderColor: '#58a6ff',
+                            borderWidth: 1,
+                            borderRadius: 2
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    onClick: function(event, elements) {
+                        if (elements.length === 0) return;
+                        var idx = elements[0].index;
+                        var datasetIdx = elements[0].datasetIndex;
+                        var weekStart = participationWeekDates[idx];
+                        var weekEnd = new Date(weekStart.getTime() + 6 * 24 * 60 * 60 * 1000);
+                        var since = weekStart.toISOString().slice(0, 10);
+                        var until = weekEnd.toISOString().slice(0, 10);
+                        var url = 'https://github.com/' + REPO_OWNER + '/' + REPO_NAME + '/commits?since=' + since + '&until=' + until;
+                        // Maintainer bar → filter to primary author's commits
+                        if (datasetIdx === 0 && primaryAuthor) url += '&author=' + primaryAuthor;
+                        window.open(url, '_blank');
+                    },
+                    scales: {
+                        x: {
+                            stacked: true,
+                            ticks: { color: '#8b949e', maxRotation: 45, autoSkip: true, maxTicksLimit: 20 },
+                            grid: { color: '#30363d' }
+                        },
+                        y: {
+                            stacked: true,
+                            beginAtZero: true,
+                            ticks: { color: '#8b949e', precision: 0 },
+                            grid: { color: '#30363d' }
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            labels: { color: '#e6edf3', usePointStyle: true, pointStyle: 'circle' }
+                        },
+                        tooltip: {
+                            backgroundColor: '#161b22',
+                            titleColor: '#e6edf3',
+                            bodyColor: '#8b949e',
+                            borderColor: '#30363d',
+                            borderWidth: 1,
+                            callbacks: {
+                                afterBody: function() { return 'Click to view commits'; }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        function renderPunchCard(data) {
+            if (!data || data.length === 0) return;
+
+            // data = array of [day_of_week (0=Sun), hour (0-23), commits]
+            // Build a 7x24 matrix
+            var matrix = [];
+            var maxVal = 0;
+            for (var d = 0; d < 7; d++) {
+                matrix[d] = [];
+                for (var h = 0; h < 24; h++) {
+                    matrix[d][h] = 0;
+                }
+            }
+            for (var k = 0; k < data.length; k++) {
+                var day = data[k][0], hour = data[k][1], count = data[k][2];
+                matrix[day][hour] = count;
+                if (count > maxVal) maxVal = count;
+            }
+
+            var dayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+            var html = '<table class="punch-card"><thead><tr><th></th>';
+            for (var h = 0; h < 24; h++) {
+                html += '<th>' + (h % 6 === 0 ? (h === 0 ? '12a' : (h < 12 ? h + 'a' : (h === 12 ? '12p' : (h - 12) + 'p'))) : '') + '</th>';
+            }
+            html += '</tr></thead><tbody>';
+
+            for (var d = 0; d < 7; d++) {
+                html += '<tr><th>' + dayLabels[d] + '</th>';
+                for (var h = 0; h < 24; h++) {
+                    var val = matrix[d][h];
+                    var intensity = maxVal > 0 ? val / maxVal : 0;
+                    var bg;
+                    if (val === 0) {
+                        bg = 'var(--bg-tertiary)';
+                    } else if (intensity < 0.25) {
+                        bg = 'rgba(63, 185, 80, 0.2)';
+                    } else if (intensity < 0.5) {
+                        bg = 'rgba(63, 185, 80, 0.4)';
+                    } else if (intensity < 0.75) {
+                        bg = 'rgba(63, 185, 80, 0.6)';
+                    } else {
+                        bg = 'rgba(63, 185, 80, 0.85)';
+                    }
+                    html += '<td title="' + dayLabels[d] + ' ' + (h % 12 || 12) + (h < 12 ? 'am' : 'pm') + ': ' + val + ' commits">';
+                    html += '<div class="punch-cell" style="background: ' + bg + ';"></div>';
+                    html += '</td>';
+                }
+                html += '</tr>';
+            }
+            html += '</tbody></table>';
+
+            document.getElementById('punch-card-container').innerHTML = html;
+        }
+
+        function renderContributors(data) {
+            if (!data || data.length === 0) return;
+
+            // data = array of { author: { login, avatar_url, ... }, total, weeks: [...] }
+            // Sort by total commits descending
+            var sorted = data.slice().sort(function(a, b) { return b.total - a.total; });
+
+            var html = '';
+            for (var i = 0; i < sorted.length; i++) {
+                var c = sorted[i];
+                var author = c.author || {};
+                html += '<div class="contributor-item">';
+                html += '<img src="' + escapeHtml(author.avatar_url || '') + '" alt="' + escapeHtml(author.login || '?') + '">';
+                html += '<div>';
+                html += '<div class="contributor-name"><a href="https://github.com/' + escapeHtml(author.login || '') + '" target="_blank">' + escapeHtml(author.login || 'Unknown') + '</a></div>';
+                html += '<div class="contributor-stats">' + fmt(c.total) + ' commits</div>';
+                html += '</div>';
+                html += '</div>';
+            }
+
+            document.getElementById('contributors-list').innerHTML = html;
         }
 
         // ==================== SHARED CHART OPTIONS ====================

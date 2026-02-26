@@ -1,0 +1,27 @@
+{
+  "_testNote": "SYNTHETIC ARCHIVE TEST DATA - simulates the GitHub Gist archive API response. The real archive gist returns a gist object with .files containing keys like 'archive-2025-12.json'. Each file's content is { dailyHistory: [...] }. This fixture is served by the test server as a mock of that gist API response.",
+  "_archiveFormat": "The dashboard fetches ARCHIVE_API_URL (api.github.com/gists/{id}), iterates gist.files for keys matching /^archive-\\d{4}-\\d{2}\\.json$/, then fetches each file's raw_url. Each archive file is { dailyHistory: [...] }.",
+  "id": "b44b12adb623ae3ac8f1993970ab5266",
+  "description": "Stats archive for comfyui-triton-and-sageattention-installer (TEST FIXTURE)",
+  "files": {
+    "archive-2025-12.json": {
+      "filename": "archive-2025-12.json",
+      "type": "application/json",
+      "language": "JSON",
+      "raw_url": "__ARCHIVE_RAW_URL_2025_12__",
+      "size": 4096,
+      "truncated": false
+    },
+    "archive-2026-01.json": {
+      "filename": "archive-2026-01.json",
+      "type": "application/json",
+      "language": "JSON",
+      "raw_url": "__ARCHIVE_RAW_URL_2026_01__",
+      "size": 6144,
+      "truncated": false
+    }
+  },
+  "public": true,
+  "created_at": "2025-12-01T00:00:00Z",
+  "updated_at": "2026-02-01T00:00:00Z"
+}

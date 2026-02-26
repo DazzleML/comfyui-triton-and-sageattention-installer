@@ -1,0 +1,165 @@
+{
+  "_testNote": "SYNTHETIC ARCHIVE: January 2026 - covers Jan 1-16, the period before the current 40-day rolling window starts (2026-01-17). Tests All History prepend of pre-window data.",
+  "dailyHistory": [
+    {
+      "date": "2026-01-01T00:00:00Z",
+      "clones": 15,
+      "views": 120,
+      "downloads": 1,
+      "stars": 58,
+      "forks": 2,
+      "openIssues": 3,
+      "total": 15
+    },
+    {
+      "date": "2026-01-02T00:00:00Z",
+      "clones": 20,
+      "views": 160,
+      "downloads": 2,
+      "stars": 58,
+      "forks": 2,
+      "openIssues": 3,
+      "total": 20
+    },
+    {
+      "date": "2026-01-03T00:00:00Z",
+      "clones": 18,
+      "views": 144,
+      "downloads": 1,
+      "stars": 59,
+      "forks": 2,
+      "openIssues": 3,
+      "total": 18
+    },
+    {
+      "date": "2026-01-04T00:00:00Z",
+      "clones": 25,
+      "views": 200,
+      "downloads": 3,
+      "stars": 60,
+      "forks": 2,
+      "openIssues": 3,
+      "total": 25
+    },
+    {
+      "date": "2026-01-05T00:00:00Z",
+      "clones": 12,
+      "views": 96,
+      "downloads": 0,
+      "stars": 60,
+      "forks": 2,
+      "openIssues": 3,
+      "total": 12
+    },
+    {
+      "date": "2026-01-06T00:00:00Z",
+      "clones": 9,
+      "views": 72,
+      "downloads": 0,
+      "stars": 61,
+      "forks": 2,
+      "openIssues": 3,
+      "total": 9
+    },
+    {
+      "date": "2026-01-07T00:00:00Z",
+      "clones": 27,
+      "views": 216,
+      "downloads": 3,
+      "stars": 62,
+      "forks": 2,
+      "openIssues": 3,
+      "total": 27
+    },
+    {
+      "date": "2026-01-08T00:00:00Z",
+      "clones": 31,
+      "views": 248,
+      "downloads": 4,
+      "stars": 63,
+      "forks": 2,
+      "openIssues": 3,
+      "total": 31
+    },
+    {
+      "date": "2026-01-09T00:00:00Z",
+      "clones": 22,
+      "views": 176,
+      "downloads": 2,
+      "stars": 63,
+      "forks": 2,
+      "openIssues": 3,
+      "total": 22
+    },
+    {
+      "date": "2026-01-10T00:00:00Z",
+      "clones": 16,
+      "views": 128,
+      "downloads": 1,
+      "stars": 64,
+      "forks": 2,
+      "openIssues": 3,
+      "total": 16
+    },
+    {
+      "date": "2026-01-11T00:00:00Z",
+      "clones": 13,
+      "views": 104,
+      "downloads": 0,
+      "stars": 64,
+      "forks": 2,
+      "openIssues": 3,
+      "total": 13
+    },
+    {
+      "date": "2026-01-12T00:00:00Z",
+      "clones": 19,
+      "views": 152,
+      "downloads": 2,
+      "stars": 65,
+      "forks": 2,
+      "openIssues": 3,
+      "total": 19
+    },
+    {
+      "date": "2026-01-13T00:00:00Z",
+      "clones": 24,
+      "views": 192,
+      "downloads": 2,
+      "stars": 66,
+      "forks": 2,
+      "openIssues": 3,
+      "total": 24
+    },
+    {
+      "date": "2026-01-14T00:00:00Z",
+      "clones": 17,
+      "views": 136,
+      "downloads": 1,
+      "stars": 67,
+      "forks": 2,
+      "openIssues": 3,
+      "total": 17
+    },
+    {
+      "date": "2026-01-15T00:00:00Z",
+      "clones": 11,
+      "views": 88,
+      "downloads": 0,
+      "stars": 67,
+      "forks": 2,
+      "openIssues": 3,
+      "total": 11
+    },
+    {
+      "date": "2026-01-16T00:00:00Z",
+      "clones": 14,
+      "views": 112,
+      "downloads": 1,
+      "stars": 58,
+      "forks": 2,
+      "openIssues": 3,
+      "total": 14
+    }
+  ]
+}

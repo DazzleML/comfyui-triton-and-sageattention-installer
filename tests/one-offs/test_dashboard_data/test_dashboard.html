@@ -1,0 +1,2130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TEST MODE: ComfyUI Triton Stats Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"
+            onerror="document.getElementById('chart-fallback').classList.remove('hidden')"></script>
+    <style>
+        /* ===== TEST HARNESS BANNER ===== */
+        #test-banner {
+            position: sticky;
+            top: 0;
+            z-index: 9999;
+            background: #1a3a1a;
+            border-bottom: 2px solid #3fb950;
+            padding: 0.5rem 1rem;
+            font-family: monospace;
+            font-size: 0.8rem;
+            color: #3fb950;
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            flex-wrap: wrap;
+        }
+        #test-banner strong { color: #e6edf3; }
+        #test-banner .test-pills {
+            display: flex;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+        }
+        .test-pill {
+            background: rgba(63, 185, 80, 0.15);
+            border: 1px solid #3fb950;
+            border-radius: 12px;
+            padding: 0.15rem 0.6rem;
+            font-size: 0.7rem;
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+        .test-pill:hover { background: rgba(63, 185, 80, 0.3); }
+        .test-pill.active { background: rgba(63, 185, 80, 0.5); color: #fff; }
+        #test-log {
+            position: fixed;
+            bottom: 0;
+            right: 0;
+            width: 420px;
+            max-height: 240px;
+            overflow-y: auto;
+            background: #0d1117;
+            border: 1px solid #30363d;
+            border-bottom: none;
+            border-right: none;
+            border-radius: 8px 0 0 0;
+            font-family: monospace;
+            font-size: 0.72rem;
+            z-index: 9998;
+            display: none;
+        }
+        #test-log.visible { display: block; }
+        #test-log-header {
+            background: #161b22;
+            padding: 0.3rem 0.6rem;
+            border-bottom: 1px solid #30363d;
+            color: #8b949e;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        #test-log-body { padding: 0.4rem 0.6rem; }
+        .log-entry { margin: 0.2rem 0; }
+        .log-ok { color: #3fb950; }
+        .log-warn { color: #d29922; }
+        .log-err { color: #f85149; }
+        .log-info { color: #58a6ff; }
+
+        /* ===== REAL DASHBOARD STYLES (copied verbatim) ===== */
+        :root {
+            --bg-primary: #0d1117;
+            --bg-secondary: #161b22;
+            --bg-tertiary: #1c2128;
+            --border: #30363d;
+            --text-primary: #e6edf3;
+            --text-secondary: #8b949e;
+            --accent-blue: #58a6ff;
+            --accent-green: #3fb950;
+            --accent-purple: #bc8cff;
+            --accent-red: #f85149;
+            --accent-orange: #d29922;
+            --accent-pink: #f778ba;
+            --accent-purple-light: #d4b8ff;
+            --accent-blue-light: #8ec5ff;
+        }
+        *, *::before, *::after { box-sizing: border-box; }
+        html, body {
+            margin: 0; padding: 0;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif;
+            line-height: 1.5;
+        }
+        a { color: var(--accent-blue); text-decoration: none; }
+        a:hover { text-decoration: underline; }
+        .container { max-width: 960px; margin: 0 auto; padding: 2rem 1.5rem; }
+        header { text-align: center; margin-bottom: 2rem; }
+        .banner-link {
+            display: block; background: var(--bg-secondary); border: 1px solid var(--border);
+            border-radius: 10px; padding: 0.9rem 2rem; margin-bottom: 1.25rem;
+            text-decoration: none; transition: border-color 0.2s;
+        }
+        .banner-link:hover { border-color: var(--accent-blue); text-decoration: none; }
+        .banner-title { font-size: 1.4rem; font-weight: 700; color: var(--text-primary); margin: 0; letter-spacing: -0.01em; }
+        .banner-arrow { font-size: 0.85rem; color: var(--text-secondary); margin-top: 0.25rem; transition: color 0.2s; }
+        .banner-link:hover .banner-arrow { color: var(--accent-blue); }
+        header h1 { margin: 0 0 0.25rem 0; font-size: 1.75rem; font-weight: 600; }
+        .subtitle { color: var(--text-secondary); font-size: 0.95rem; margin: 0; }
+        .tab-bar {
+            display: flex; gap: 0; border-bottom: 1px solid var(--border);
+            margin-bottom: 2rem; overflow-x: auto;
+        }
+        .tab {
+            padding: 0.6rem 1.25rem; border-bottom: 2px solid transparent;
+            color: var(--text-secondary); cursor: pointer; font-size: 0.9rem;
+            white-space: nowrap; transition: color 0.15s, border-color 0.15s; user-select: none;
+        }
+        .tab:hover { color: var(--text-primary); }
+        .tab.active { color: var(--accent-blue); border-bottom-color: var(--accent-blue); }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+        .summary-cards {
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 1rem; margin: 2rem 0;
+        }
+        .card { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 8px; padding: 1.25rem; text-align: center; }
+        .card-primary { border-color: var(--accent-blue); }
+        .card-label { font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.5rem; text-transform: uppercase; letter-spacing: 0.05em; }
+        .card-value { font-size: 2rem; font-weight: 700; line-height: 1.2; }
+        .card-pct { font-size: 0.85rem; color: var(--text-secondary); margin-top: 0.25rem; }
+        .card-sub { font-size: 0.75rem; color: var(--text-secondary); margin-top: 0.25rem; }
+        .chart-section { margin: 2rem 0; }
+        .chart-section h2 { font-size: 1.1rem; font-weight: 600; margin-bottom: 1rem; }
+        .chart-note { font-weight: 400; font-size: 0.85rem; color: var(--text-secondary); }
+        .chart-controls { display: flex; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap; }
+        .chart-btn {
+            padding: 0.4rem 0.85rem; border: 1px solid var(--border); border-radius: 6px;
+            background: var(--bg-secondary); color: var(--text-secondary); font-size: 0.8rem;
+            cursor: pointer; transition: border-color 0.15s, color 0.15s;
+        }
+        .chart-btn:hover { border-color: var(--text-secondary); color: var(--text-primary); }
+        .chart-btn.active { border-color: var(--accent-blue); color: var(--accent-blue); background: rgba(88, 166, 255, 0.08); }
+        .chart-container { position: relative; height: 350px; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 8px; padding: 1rem; }
+        .note { font-size: 0.85rem; color: var(--text-secondary); margin-top: 0.75rem; font-style: italic; }
+        .activity-section { margin: 2rem 0; }
+        .activity-section h2 { font-size: 1.1rem; font-weight: 600; margin-bottom: 1rem; }
+        .indicators { display: flex; gap: 2rem; flex-wrap: wrap; }
+        .indicator { display: flex; align-items: center; font-size: 0.95rem; }
+        .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 0.5rem; flex-shrink: 0; }
+        .dot.active { background: var(--accent-green); box-shadow: 0 0 6px rgba(63, 185, 80, 0.5); }
+        .dot.warning { background: var(--accent-orange); box-shadow: 0 0 6px rgba(210, 153, 34, 0.5); }
+        .dot.inactive { background: var(--border); }
+        .referrers-table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
+        .referrers-table th, .referrers-table td { padding: 0.6rem 1rem; text-align: left; border-bottom: 1px solid var(--border); }
+        .referrers-table th { color: var(--text-secondary); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600; }
+        .referrers-table td { font-size: 0.9rem; }
+        .referrers-table tr:last-child td { border-bottom: none; }
+        .referrers-table .rank { color: var(--text-secondary); font-size: 0.8rem; }
+        .referrer-bar { height: 4px; background: var(--accent-blue); border-radius: 2px; margin-top: 0.25rem; transition: width 0.3s; }
+        .path-text { font-family: monospace; font-size: 0.8rem; color: var(--text-secondary); word-break: break-all; }
+        .punch-card { border-collapse: collapse; margin-top: 0.5rem; }
+        .punch-card th, .punch-card td { padding: 0; text-align: center; font-size: 0.65rem; color: var(--text-secondary); }
+        .punch-card th { padding: 0 0.3rem; font-weight: 400; }
+        .punch-cell { width: 18px; height: 18px; border-radius: 3px; margin: 1px; display: inline-block; }
+        .meta-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0.75rem; margin-top: 1rem; }
+        .meta-item { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 6px; padding: 0.75rem 1rem; font-size: 0.85rem; }
+        .meta-label { color: var(--text-secondary); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.25rem; }
+        .meta-value { color: var(--text-primary); font-weight: 500; }
+        .contributor-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 0.75rem; margin-top: 0.5rem; }
+        .contributor-item { display: flex; align-items: center; gap: 0.75rem; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 6px; padding: 0.75rem; }
+        .contributor-item img { width: 32px; height: 32px; border-radius: 50%; }
+        .contributor-name { font-weight: 500; font-size: 0.9rem; }
+        .contributor-stats { font-size: 0.75rem; color: var(--text-secondary); }
+        .stat-row { display: flex; gap: 1rem; flex-wrap: wrap; margin: 1.5rem 0; }
+        .stat-item { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 8px; padding: 1rem 1.5rem; flex: 1; min-width: 120px; text-align: center; }
+        .stat-value { font-size: 1.75rem; font-weight: 700; line-height: 1.2; }
+        .stat-label { font-size: 0.8rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em; margin-top: 0.25rem; }
+        .toggle-row { display: flex; gap: 1.25rem; flex-wrap: wrap; margin-bottom: 1rem; }
+        .toggle-label { display: flex; align-items: center; gap: 0.4rem; font-size: 0.85rem; color: var(--text-secondary); cursor: pointer; user-select: none; }
+        .toggle-label input[type="checkbox"] { accent-color: var(--accent-blue); }
+        .toggle-swatch { display: inline-block; width: 12px; height: 3px; border-radius: 2px; }
+        .loading { text-align: center; padding: 4rem 0; }
+        .spinner { width: 40px; height: 40px; border: 3px solid var(--border); border-top-color: var(--accent-blue); border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto 1rem; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .loading p { color: var(--text-secondary); }
+        .spinner-sm { width: 14px; height: 14px; border: 2px solid var(--border); border-top-color: var(--accent-blue); border-radius: 50%; animation: spin 0.8s linear infinite; display: inline-block; vertical-align: middle; margin-right: 0.4rem; }
+        .stats-loading { color: var(--text-secondary); font-size: 0.85rem; padding: 0.5rem 0; }
+        .stats-error { color: var(--text-secondary); font-size: 0.85rem; padding: 0.5rem 0; font-style: italic; }
+        .error { background: rgba(248, 81, 73, 0.1); border: 1px solid var(--accent-red); border-radius: 8px; padding: 1rem; text-align: center; margin: 1rem 0; }
+        .error button { margin-left: 1rem; padding: 0.3rem 0.75rem; border: 1px solid var(--accent-red); border-radius: 6px; background: transparent; color: var(--accent-red); cursor: pointer; font-size: 0.85rem; }
+        .error button:hover { background: rgba(248, 81, 73, 0.15); }
+        .privacy-note { margin-top: 3rem; padding: 1rem 1.25rem; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-secondary); font-size: 0.8rem; color: var(--text-secondary); line-height: 1.6; }
+        .privacy-note strong { color: var(--text-primary); }
+        footer { margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid var(--border); text-align: center; font-size: 0.85rem; color: var(--text-secondary); }
+        footer p { margin: 0.3rem 0; }
+        .hidden { display: none !important; }
+        @media (max-width: 600px) {
+            .summary-cards { grid-template-columns: repeat(2, 1fr); }
+            .chart-container { height: 250px; }
+            .container { padding: 1.25rem 1rem; }
+            .indicators { gap: 1rem; }
+            .banner-link { padding: 0.7rem 1rem; }
+            .banner-title { font-size: 1.15rem; }
+            .tab { padding: 0.5rem 0.85rem; font-size: 0.8rem; }
+            .stat-item { min-width: 80px; padding: 0.75rem 1rem; }
+            .stat-value { font-size: 1.4rem; }
+        }
+    </style>
+</head>
+<body>
+
+<!-- ===================== TEST HARNESS BANNER ===================== -->
+<div id="test-banner">
+    <span><strong>[TEST MODE]</strong> Using synthetic local data &mdash; no network requests to gist.githubusercontent.com</span>
+    <div class="test-pills">
+        <span class="test-pill active" onclick="selectScenario('all')" id="pill-all">All Scenarios</span>
+        <span class="test-pill" onclick="selectScenario('archive')" id="pill-archive">With Archive</span>
+        <span class="test-pill" onclick="selectScenario('no-archive')" id="pill-no-archive">No Archive</span>
+        <span class="test-pill" onclick="selectScenario('archive-error')" id="pill-archive-error">Archive Error</span>
+        <span class="test-pill" onclick="toggleLog()" id="pill-log">Show Log</span>
+    </div>
+    <span id="test-date-note" style="color: #8b949e; font-size: 0.7rem;"></span>
+</div>
+
+<!-- ===================== TEST LOG ===================== -->
+<div id="test-log">
+    <div id="test-log-header">
+        <span>Test Fetch Intercept Log</span>
+        <span onclick="toggleLog()" style="cursor:pointer; color: #58a6ff;">close</span>
+    </div>
+    <div id="test-log-body"></div>
+</div>
+
+<!-- ===================== REAL DASHBOARD HTML ===================== -->
+<div class="container">
+    <header>
+        <a href="https://github.com/DazzleML/comfyui-triton-and-sageattention-installer" class="banner-link">
+            <p class="banner-title">ComfyUI Triton &amp; SageAttention Installer</p>
+            <p class="banner-arrow">View repository &rarr;</p>
+        </a>
+        <h1>Project Statistics <span style="color: #3fb950; font-size: 0.7em;">[TEST]</span></h1>
+        <p class="subtitle">Downloads, clones, views, and community insights &mdash; <em style="color:#d29922;">Synthetic test data</em></p>
+    </header>
+
+    <div id="error-banner" class="error hidden">
+        <span>Unable to load statistics. The data source may be temporarily unavailable.</span>
+        <button onclick="loadDashboard()">Retry</button>
+    </div>
+
+    <div id="loading" class="loading">
+        <div class="spinner"></div>
+        <p>Loading statistics...</p>
+    </div>
+
+    <main id="content" class="hidden">
+        <nav class="tab-bar">
+            <div class="tab active" data-tab="overview" onclick="switchTab('overview')">Overview</div>
+            <div class="tab" data-tab="installs" onclick="switchTab('installs')">Installs</div>
+            <div class="tab" data-tab="views" onclick="switchTab('views')">Views</div>
+            <div class="tab" data-tab="community" onclick="switchTab('community')">Community</div>
+            <div class="tab" data-tab="dev" onclick="switchTab('dev')">Dev</div>
+        </nav>
+
+        <!-- INSTALLS TAB -->
+        <div id="tab-installs" class="tab-content">
+            <section class="summary-cards">
+                <div class="card card-primary">
+                    <div class="card-label">Total Installs</div>
+                    <div class="card-value" id="total-installs">--</div>
+                    <div class="card-sub">downloads + clones</div>
+                </div>
+                <div class="card">
+                    <div class="card-label">Release Downloads</div>
+                    <div class="card-value" id="total-downloads">--</div>
+                    <div class="card-pct" id="downloads-pct">--%</div>
+                </div>
+                <div class="card">
+                    <div class="card-label">Clones</div>
+                    <div class="card-value" id="total-clones">--</div>
+                    <div class="card-pct" id="clones-pct">--%</div>
+                    <div class="card-sub" id="clones-unique">-- tracked unique</div>
+                </div>
+                <div class="card">
+                    <div class="card-label">Recent Activity</div>
+                    <div class="card-value" id="recent-value">--</div>
+                    <div class="card-sub" id="recent-window">--</div>
+                </div>
+            </section>
+
+            <section class="chart-section">
+                <h2>Daily Activity <span class="chart-note" id="installs-chart-note">(rolling 31-day window)</span></h2>
+                <div class="chart-controls">
+                    <button class="chart-btn active" id="btn-installs-recent" onclick="showInstallsRecent()">Last 31 Days</button>
+                    <button class="chart-btn" id="btn-installs-all" onclick="showInstallsAll()">All History</button>
+                </div>
+                <div class="chart-container">
+                    <canvas id="installsChart"></canvas>
+                </div>
+                <p id="chart-fallback" class="note hidden">Chart library could not be loaded. Summary statistics are shown above.</p>
+                <p id="sparse-data-note" class="note hidden"></p>
+                <p id="installs-archive-loading" class="note hidden">Loading historical data...</p>
+                <p id="installs-archive-note" class="note hidden"></p>
+            </section>
+
+            <section class="activity-section">
+                <h2>Activity Windows</h2>
+                <div class="indicators">
+                    <div class="indicator"><span class="dot inactive" id="dot-24h"></span><span>Last 24h: <strong id="val-24h">0</strong></span></div>
+                    <div class="indicator"><span class="dot inactive" id="dot-7d"></span><span>Last 7 days: <strong id="val-7d">0</strong></span></div>
+                    <div class="indicator"><span class="dot inactive" id="dot-30d"></span><span>Last 30 days: <strong id="val-30d">0</strong></span></div>
+                </div>
+            </section>
+        </div>
+
+        <!-- VIEWS TAB -->
+        <div id="tab-views" class="tab-content">
+            <section class="summary-cards">
+                <div class="card card-primary">
+                    <div class="card-label">Total Views</div>
+                    <div class="card-value" id="total-views">--</div>
+                    <div class="card-sub" id="total-views-unique">-- unique visitors</div>
+                </div>
+                <div class="card">
+                    <div class="card-label">Today's Views</div>
+                    <div class="card-value" id="today-views">--</div>
+                    <div class="card-sub" id="today-views-sub">latest data point</div>
+                </div>
+                <div class="card">
+                    <div class="card-label">7-Day Views</div>
+                    <div class="card-value" id="week-views">--</div>
+                    <div class="card-sub">rolling week</div>
+                </div>
+                <div class="card">
+                    <div class="card-label">Top Referrer</div>
+                    <div class="card-value" id="top-referrer" style="font-size: 1.4rem;">--</div>
+                    <div class="card-sub" id="top-referrer-count">--</div>
+                </div>
+            </section>
+            <section class="chart-section">
+                <h2>Daily Page Views <span class="chart-note" id="views-chart-note">(rolling window)</span></h2>
+                <div class="chart-container"><canvas id="viewsChart"></canvas></div>
+            </section>
+            <section class="activity-section">
+                <h2>Top Referrers <span class="chart-note">(14-day snapshot)</span></h2>
+                <table class="referrers-table" id="referrers-table">
+                    <thead><tr><th>#</th><th>Source</th><th>Views</th><th>Unique</th></tr></thead>
+                    <tbody id="referrers-body">
+                        <tr><td colspan="4" style="color: var(--text-secondary); text-align: center;">No referrer data available</td></tr>
+                    </tbody>
+                </table>
+            </section>
+            <section class="activity-section">
+                <h2>Popular Pages <span class="chart-note">(14-day snapshot)</span></h2>
+                <table class="referrers-table" id="paths-table">
+                    <thead><tr><th>#</th><th>Page</th><th>Views</th><th>Unique</th></tr></thead>
+                    <tbody id="paths-body">
+                        <tr><td colspan="4" style="color: var(--text-secondary); text-align: center;">No path data available</td></tr>
+                    </tbody>
+                </table>
+            </section>
+        </div>
+
+        <!-- COMMUNITY TAB -->
+        <div id="tab-community" class="tab-content">
+            <div class="stat-row">
+                <div class="stat-item"><div class="stat-value" id="stat-stars">--</div><div class="stat-label">Stars</div></div>
+                <div class="stat-item"><div class="stat-value" id="stat-forks">--</div><div class="stat-label">Forks</div></div>
+                <div class="stat-item"><div class="stat-value" id="stat-issues">--</div><div class="stat-label">Open Issues</div></div>
+                <div class="stat-item"><div class="stat-value" id="stat-age">--</div><div class="stat-label">Project Age</div></div>
+            </div>
+            <section class="chart-section">
+                <h2>Star History</h2>
+                <div class="chart-container"><canvas id="starsChart"></canvas></div>
+                <p id="stars-loading" class="note">Loading star history from GitHub API...</p>
+                <p id="stars-note" class="note hidden"></p>
+            </section>
+            <section class="chart-section">
+                <h2>Community Trends <span class="chart-note">(daily snapshots)</span></h2>
+                <div class="chart-container"><canvas id="communityTrendsChart"></canvas></div>
+                <p id="community-trends-note" class="note hidden"></p>
+            </section>
+        </div>
+
+        <!-- OVERVIEW TAB -->
+        <div id="tab-overview" class="tab-content active">
+            <section class="summary-cards">
+                <div class="card card-primary">
+                    <div class="card-label">Total Installs</div>
+                    <div class="card-value" id="ov-installs">--</div>
+                    <div class="card-sub" id="ov-installs-unique">-- tracked unique cloners</div>
+                </div>
+                <div class="card">
+                    <div class="card-label">Total Views</div>
+                    <div class="card-value" id="ov-views">--</div>
+                    <div class="card-sub" id="ov-views-unique">-- unique viewers</div>
+                </div>
+                <div class="card">
+                    <div class="card-label">Stars</div>
+                    <div class="card-value" id="ov-stars">--</div>
+                </div>
+                <div class="card">
+                    <div class="card-label">Forks</div>
+                    <div class="card-value" id="ov-forks">--</div>
+                </div>
+            </section>
+            <section class="chart-section">
+                <h2>Combined Daily Activity <span class="chart-note">(all metrics)</span></h2>
+                <div class="toggle-row">
+                    <label class="toggle-label"><input type="checkbox" id="ov-toggle-views" onchange="renderOverviewChart()"><span class="toggle-swatch" style="background: var(--accent-blue);"></span>Views</label>
+                    <label class="toggle-label"><input type="checkbox" id="ov-toggle-unique-views" checked onchange="renderOverviewChart()"><span class="toggle-swatch" style="background: var(--accent-blue-light);"></span>Unique Views</label>
+                    <label class="toggle-label"><input type="checkbox" id="ov-toggle-clones" onchange="renderOverviewChart()"><span class="toggle-swatch" style="background: var(--accent-purple);"></span>Clones</label>
+                    <label class="toggle-label"><input type="checkbox" id="ov-toggle-unique-clones" checked onchange="renderOverviewChart()"><span class="toggle-swatch" style="background: var(--accent-purple-light);"></span>Unique Clones</label>
+                    <label class="toggle-label"><input type="checkbox" id="ov-toggle-downloads" checked onchange="renderOverviewChart()"><span class="toggle-swatch" style="background: var(--accent-green);"></span>Downloads</label>
+                    <label class="toggle-label"><input type="checkbox" id="ov-toggle-installs" checked onchange="renderOverviewChart()"><span class="toggle-swatch" style="background: rgba(88, 166, 255, 0.25);"></span>Total Installs (area)</label>
+                </div>
+                <div class="chart-container"><canvas id="overviewChart"></canvas></div>
+            </section>
+        </div>
+
+        <!-- DEV TAB -->
+        <div id="tab-dev" class="tab-content">
+            <section class="summary-cards">
+                <div class="card" title="Includes ~1,000 base approximation from before CI tracking began">
+                    <div class="card-label">Raw Clones</div>
+                    <div class="card-value" id="dev-raw-clones">--</div>
+                    <div class="card-sub">includes CI + base estimate</div>
+                </div>
+                <div class="card">
+                    <div class="card-label">CI Checkouts</div>
+                    <div class="card-value" id="dev-ci-checkouts">--</div>
+                    <div class="card-sub" id="dev-ci-rate">--% of tracked</div>
+                </div>
+                <div class="card card-primary">
+                    <div class="card-label">Organic Clones</div>
+                    <div class="card-value" id="dev-organic-clones">--</div>
+                    <div class="card-sub" id="dev-unique-clones">-- unique cloners</div>
+                </div>
+                <div class="card">
+                    <div class="card-label">Data Freshness</div>
+                    <div class="card-value" id="dev-freshness">--</div>
+                    <div class="card-sub" id="dev-last-capture">--</div>
+                </div>
+            </section>
+            <section class="chart-section">
+                <h2>Clone Breakdown <span class="chart-note">(raw vs organic vs unique)</span></h2>
+                <div class="chart-container"><canvas id="devChart"></canvas></div>
+            </section>
+            <section class="activity-section">
+                <h2>CI Checkout Breakdown <span class="chart-note">(last 31 days)</span></h2>
+                <table class="referrers-table" id="ci-table">
+                    <thead><tr><th>Date</th><th>CI Checkouts</th><th>Workflows</th></tr></thead>
+                    <tbody id="ci-breakdown-body">
+                        <tr><td colspan="3" style="color: var(--text-secondary); text-align: center;">No CI checkout data collected yet</td></tr>
+                    </tbody>
+                </table>
+            </section>
+            <section class="activity-section">
+                <h2>Operational Status</h2>
+                <div class="meta-grid">
+                    <div class="meta-item">
+                        <div class="meta-label">Last Data Capture</div>
+                        <div class="meta-value"><span class="dot" id="dev-health-dot"></span><span id="dev-capture-time">--</span></div>
+                    </div>
+                    <div class="meta-item">
+                        <div class="meta-label">Workflow Schedule</div>
+                        <div class="meta-value">Daily 3AM UTC + after CI</div>
+                    </div>
+                    <div class="meta-item">
+                        <div class="meta-label">Data Retention</div>
+                        <div class="meta-value">31 days (archived monthly)</div>
+                    </div>
+                    <div class="meta-item">
+                        <div class="meta-label">Dashboard Version</div>
+                        <div class="meta-value" id="dev-version">0.7.11-TEST</div>
+                    </div>
+                </div>
+            </section>
+            <section class="chart-section">
+                <h2>Commit Activity <span class="chart-note">(52 weeks &middot; TEST: stubbed)</span></h2>
+                <div id="commit-status" class="stats-loading">GitHub stats endpoints are bypassed in test mode.</div>
+                <div class="chart-container"><canvas id="commitChart"></canvas></div>
+            </section>
+            <section class="chart-section">
+                <h2>Code Frequency <span class="chart-note">(additions &amp; deletions)</span></h2>
+                <div id="codefreq-status" class="stats-loading">GitHub stats endpoints are bypassed in test mode.</div>
+                <div class="chart-container"><canvas id="codeFreqChart"></canvas></div>
+            </section>
+            <section class="chart-section">
+                <h2>Participation <span class="chart-note">(maintainer vs community, 52 weeks)</span></h2>
+                <div id="participation-status" class="stats-loading">GitHub stats endpoints are bypassed in test mode.</div>
+                <div class="chart-container"><canvas id="participationChart"></canvas></div>
+            </section>
+            <section class="chart-section">
+                <h2>Punch Card <span class="chart-note">(commits by day &amp; hour)</span></h2>
+                <div id="punchcard-status" class="stats-loading">GitHub stats endpoints are bypassed in test mode.</div>
+                <div id="punch-card-container" style="overflow-x: auto;"></div>
+            </section>
+            <section class="activity-section">
+                <h2>Contributors</h2>
+                <div id="contributors-status" class="stats-loading">GitHub stats endpoints are bypassed in test mode.</div>
+                <div id="contributors-list" class="contributor-grid"></div>
+            </section>
+        </div>
+    </main>
+
+    <footer>
+        <p>Data updates daily at 3:00 AM UTC &middot; Last data point: <span id="last-updated">--</span></p>
+        <p><a href="https://github.com/DazzleML/comfyui-triton-and-sageattention-installer">Repository</a> &middot; <a href="https://github.com/DazzleML/comfyui-triton-and-sageattention-installer/releases">Releases</a></p>
+        <aside class="privacy-note">
+            <strong>Test Mode</strong> &mdash; This is a test harness using synthetic data. No real gist or GitHub API calls are made.
+            See the <code>_scenario</code> fields in <code>state.json</code> for what each date range exercises.
+        </aside>
+    </footer>
+</div>
+
+<script>
+// =====================================================================
+// TEST HARNESS: Generate dates dynamically relative to today
+// This keeps the fixture valid regardless of when the test is run.
+// =====================================================================
+
+(function() {
+    'use strict';
+
+    // --- Compute dates relative to today ---
+    function daysAgoISO(n) {
+        var d = new Date();
+        d.setUTCDate(d.getUTCDate() - n);
+        d.setUTCHours(0, 0, 0, 0);
+        return d.toISOString().slice(0, 10) + 'T00:00:00Z';
+    }
+
+    function daysAgoDate(n) {
+        return daysAgoISO(n).slice(0, 10);
+    }
+
+    // Show today's date in banner
+    document.getElementById('test-date-note').textContent =
+        'Today: ' + new Date().toISOString().slice(0, 10) +
+        ' | Day-0=' + daysAgoDate(0) +
+        ' | Day-40=' + daysAgoDate(40);
+
+    // --- Build the synthetic state.json dynamically ---
+    // Scenarios keyed by days-ago values from the spec
+    function buildStateData() {
+        var history = [];
+
+        // DAYS 40-35: Old data, pre-unique tracking
+        // NO uniqueClones, NO uniqueViews, NO organicUniqueClones, NO ciRuns
+        var oldDataClones  = [12, 18, 9, 22, 14, 7];
+        var oldDataViews   = [95, 142, 78, 180, 113, 61];
+        var oldDataStars   = [58, 59, 59, 61, 61, 62];
+        for (var i = 0; i < 6; i++) {
+            history.push({
+                date: daysAgoISO(40 - i),
+                clones: oldDataClones[i],
+                views: oldDataViews[i],
+                downloads: i % 3 === 1 ? 1 : 0,
+                stars: oldDataStars[i],
+                forks: 2,
+                openIssues: 3,
+                organicClones: oldDataClones[i],
+                ciCheckouts: 0,
+                total: oldDataClones[i]
+                // NOTE: NO uniqueClones, NO uniqueViews, NO organicUniqueClones, NO ciRuns
+            });
+        }
+
+        // DAYS 34-30: Partial unique data
+        // HAS uniqueClones and uniqueViews. NO organicUniqueClones, NO ciRuns
+        var partialClones = [11, 19, 25, 31, 17];
+        var partialViews  = [88, 157, 204, 241, 133];
+        var partialStars  = [62, 63, 64, 65, 66];
+        var partialUC     = [9, 14, 19, 22, 13];
+        var partialUV     = [52, 79, 98, 108, 64];
+        for (var i = 0; i < 5; i++) {
+            history.push({
+                date: daysAgoISO(34 - i),
+                clones: partialClones[i],
+                views: partialViews[i],
+                downloads: i % 2 === 1 ? 1 : 0,
+                stars: partialStars[i],
+                forks: i >= 3 ? 3 : 2,
+                openIssues: i >= 2 ? 4 : 3,
+                organicClones: partialClones[i],
+                ciCheckouts: 0,
+                total: partialClones[i],
+                uniqueClones: partialUC[i],
+                uniqueViews: partialUV[i]
+                // NOTE: NO organicUniqueClones, NO ciRuns
+            });
+        }
+
+        // DAYS 29-25: Full data, no CI
+        // All fields: organicUniqueClones=uniqueClones, ciRuns=0, ciCheckouts=0
+        var fullNoCI_clones = [21, 13, 24, 28, 16];
+        var fullNoCI_views  = [176, 102, 195, 218, 127];
+        var fullNoCI_stars  = [67, 67, 68, 69, 70];
+        var fullNoCI_forks  = [3, 3, 3, 3, 3];
+        var fullNoCI_issues = [4, 4, 5, 5, 5];
+        var fullNoCI_UC     = [16, 10, 18, 21, 12];
+        var fullNoCI_UV     = [82, 48, 93, 104, 61];
+        for (var i = 0; i < 5; i++) {
+            history.push({
+                date: daysAgoISO(29 - i),
+                clones: fullNoCI_clones[i],
+                views: fullNoCI_views[i],
+                downloads: i === 0 ? 2 : (i === 2 ? 1 : (i === 3 ? 2 : 0)),
+                stars: fullNoCI_stars[i],
+                forks: fullNoCI_forks[i],
+                openIssues: fullNoCI_issues[i],
+                organicClones: fullNoCI_clones[i],
+                ciCheckouts: 0,
+                total: fullNoCI_clones[i],
+                uniqueClones: fullNoCI_UC[i],
+                uniqueViews: fullNoCI_UV[i],
+                organicUniqueClones: fullNoCI_UC[i],
+                ciRuns: 0
+            });
+        }
+
+        // DAYS 24-20: Full data WITH CI
+        // Day 24 (first entry) has high CI load; rest are normal
+        var withCI_days = [24, 23, 22, 21, 20];
+        var withCI = [
+            // day 24: high CI
+            { clones: 90, views: 287, downloads: 4, stars: 71, forks: 3, issues: 5,
+              ciCheckouts: 40, organicClones: 50, uc: 35, uv: 134, ouc: 27, ciRuns: 8 },
+            // day 23
+            { clones: 22, views: 171, downloads: 1, stars: 72, forks: 3, issues: 5,
+              ciCheckouts: 0, organicClones: 22, uc: 17, uv: 82, ouc: 17, ciRuns: 0 },
+            // day 22
+            { clones: 18, views: 139, downloads: 1, stars: 72, forks: 3, issues: 5,
+              ciCheckouts: 0, organicClones: 18, uc: 14, uv: 67, ouc: 14, ciRuns: 0 },
+            // day 21
+            { clones: 20, views: 158, downloads: 1, stars: 73, forks: 3, issues: 5,
+              ciCheckouts: 0, organicClones: 20, uc: 15, uv: 76, ouc: 15, ciRuns: 0 },
+            // day 20
+            { clones: 14, views: 112, downloads: 0, stars: 73, forks: 3, issues: 5,
+              ciCheckouts: 0, organicClones: 14, uc: 11, uv: 54, ouc: 11, ciRuns: 0 }
+        ];
+        for (var i = 0; i < withCI.length; i++) {
+            var w = withCI[i];
+            history.push({
+                date: daysAgoISO(withCI_days[i]),
+                clones: w.clones,
+                views: w.views,
+                downloads: w.downloads,
+                stars: w.stars,
+                forks: w.forks,
+                openIssues: w.issues,
+                ciCheckouts: w.ciCheckouts,
+                organicClones: w.organicClones,
+                total: w.clones,
+                uniqueClones: w.uc,
+                uniqueViews: w.uv,
+                organicUniqueClones: w.ouc,
+                ciRuns: w.ciRuns
+            });
+        }
+
+        // DAY 19: Expired unique data
+        // clones=15, views=80. NO uniqueClones (undefined), NO uniqueViews (undefined)
+        // Simulates 14-day GitHub API window expiry for unique tracking
+        history.push({
+            date: daysAgoISO(19),
+            clones: 15,
+            views: 80,
+            downloads: 0,
+            stars: 73,
+            forks: 3,
+            openIssues: 5,
+            ciCheckouts: 0,
+            organicClones: 15,
+            total: 15
+            // NOTE: NO uniqueClones, NO uniqueViews — intentionally omitted
+        });
+
+        // DAYS 18-15: Normal full data
+        var norm_days = [18, 17, 16, 15];
+        var norm = [
+            { clones: 29, views: 231, downloads: 3, stars: 74, issues: 6, uc: 22, uv: 110 },
+            { clones: 18, views: 141, downloads: 1, stars: 75, issues: 6, uc: 14, uv: 68 },
+            { clones: 26, views: 193, downloads: 2, stars: 76, issues: 6, uc: 20, uv: 93 },
+            { clones: 33, views: 258, downloads: 4, stars: 77, issues: 6, uc: 25, uv: 123 }
+        ];
+        for (var i = 0; i < norm.length; i++) {
+            var n = norm[i];
+            history.push({
+                date: daysAgoISO(norm_days[i]),
+                clones: n.clones,
+                views: n.views,
+                downloads: n.downloads,
+                stars: n.stars,
+                forks: 3,
+                openIssues: n.issues,
+                ciCheckouts: 0,
+                organicClones: n.clones,
+                total: n.clones,
+                uniqueClones: n.uc,
+                uniqueViews: n.uv,
+                organicUniqueClones: n.uc,
+                ciRuns: 0
+            });
+        }
+
+        // DAY 14: Zero traffic day
+        history.push({
+            date: daysAgoISO(14),
+            clones: 0,
+            views: 0,
+            downloads: 0,
+            stars: 77,
+            forks: 3,
+            openIssues: 6,
+            ciCheckouts: 0,
+            organicClones: 0,
+            total: 0,
+            uniqueClones: 0,
+            uniqueViews: 0,
+            organicUniqueClones: 0,
+            ciRuns: 0
+        });
+
+        // DAYS 13-3: Normal full data, varying traffic
+        var late_days = [13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3];
+        var late_data = [
+            { clones: 17, views: 134, dl: 1, stars: 77, uc: 13, uv: 64 },
+            { clones: 23, views: 181, dl: 2, stars: 77, uc: 17, uv: 87 },
+            { clones: 24, views: 188, dl: 2, stars: 78, uc: 18, uv: 90 },
+            { clones: 19, views: 151, dl: 1, stars: 78, uc: 15, uv: 72 },
+            { clones: 28, views: 218, dl: 3, stars: 78, uc: 21, uv: 104 },
+            { clones: 20, views: 156, dl: 2, stars: 79, uc: 15, uv: 75 },
+            { clones: 14, views: 109, dl: 0, stars: 79, uc: 11, uv: 52 },
+            { clones: 32, views: 248, dl: 4, stars: 79, uc: 24, uv: 119 },
+            { clones: 25, views: 197, dl: 2, stars: 79, uc: 19, uv: 94 },
+            { clones: 17, views: 136, dl: 1, stars: 79, uc: 13, uv: 65 },
+            { clones: 22, views: 174, dl: 2, stars: 79, uc: 17, uv: 83 }
+        ];
+        for (var i = 0; i < late_days.length; i++) {
+            var ld = late_data[i];
+            var entry = {
+                date: daysAgoISO(late_days[i]),
+                clones: ld.clones,
+                views: ld.views,
+                downloads: ld.dl,
+                stars: ld.stars,
+                forks: 3,
+                openIssues: 6,
+                ciCheckouts: 0,
+                organicClones: ld.clones,
+                total: ld.clones,
+                uniqueClones: ld.uc,
+                uniqueViews: ld.uv,
+                organicUniqueClones: ld.uc,
+                ciRuns: 0
+            };
+            // Add capturedAt for the last few to test data freshness
+            if (late_days[i] <= 7) {
+                var cap = new Date();
+                cap.setUTCDate(cap.getUTCDate() - (late_days[i] - 1));
+                cap.setUTCHours(3, 1, 0, 0);
+                entry.capturedAt = cap.toISOString().replace('.000Z', 'Z');
+            }
+            history.push(entry);
+        }
+
+        // DAY 2: High CI day
+        // clones=90, ciCheckouts=40, organicClones=50, ciRuns=8
+        var cap2 = new Date();
+        cap2.setUTCDate(cap2.getUTCDate() - 1);
+        cap2.setUTCHours(3, 1, 5, 0);
+        history.push({
+            date: daysAgoISO(2),
+            clones: 90,
+            views: 241,
+            downloads: 5,
+            stars: 79,
+            forks: 3,
+            openIssues: 6,
+            ciCheckouts: 40,
+            organicClones: 50,
+            total: 90,
+            uniqueClones: 35,
+            uniqueViews: 115,
+            organicUniqueClones: 27,
+            ciRuns: 8,
+            capturedAt: cap2.toISOString().replace('.000Z', 'Z')
+        });
+
+        // DAY 1: Yesterday, complete
+        var cap1 = new Date();
+        cap1.setUTCHours(3, 0, 47, 0);
+        history.push({
+            date: daysAgoISO(1),
+            clones: 19,
+            views: 152,
+            downloads: 2,
+            stars: 79,
+            forks: 3,
+            openIssues: 6,
+            ciCheckouts: 0,
+            organicClones: 19,
+            total: 19,
+            uniqueClones: 14,
+            uniqueViews: 73,
+            organicUniqueClones: 14,
+            ciRuns: 0,
+            capturedAt: cap1.toISOString().replace('.000Z', 'Z')
+        });
+
+        // DAY 0: Today, partial (old workflow)
+        // clones=10, views=50. NO uniqueClones, NO uniqueViews, NO ciCheckouts, NO organicClones, NO ciRuns
+        // HAS organicUniqueClones=0 (bad compute artifact from missing data)
+        history.push({
+            date: daysAgoISO(0),
+            clones: 10,
+            views: 50,
+            downloads: 0,
+            stars: 79,
+            forks: 3,
+            openIssues: 6,
+            organicUniqueClones: 0
+            // NOTE: NO uniqueClones, NO uniqueViews, NO ciCheckouts, NO organicClones, NO ciRuns
+        });
+
+        return {
+            _testNote: 'SYNTHETIC TEST DATA - generated dynamically at ' + new Date().toISOString(),
+            totalClones: 1873,
+            totalUniqueClones: 412,
+            totalOrganicUniqueClones: 389,
+            totalCiUniqueClones: 23,
+            totalViews: 5840,
+            totalUniqueViews: 2310,
+            totalDownloads: 47,
+            totalCiCheckouts: 180,
+            baselineClones: 1000,
+            baselineNote: 'TEST FIXTURE: Estimated pre-tracking total',
+            stars: 79,
+            forks: 3,
+            openIssues: 6,
+            referrers: [
+                { source: 'Google', count: 983, uniques: 480 },
+                { source: 'github.com', count: 312, uniques: 198 },
+                { source: 'com.reddit.frontpage', count: 87, uniques: 64 }
+            ],
+            popularPaths: [
+                {
+                    path: '/DazzleML/comfyui-triton-and-sageattention-installer',
+                    title: 'DazzleML/comfyui-triton-and-sageattention-installer',
+                    count: 2400, uniques: 980
+                },
+                {
+                    path: '/DazzleML/comfyui-triton-and-sageattention-installer/blob/main/README.md',
+                    // Double-encoded middot to exercise the title cleanup code
+                    title: 'comfyui-triton-and-sageattention-installer\u00c2\u00b7README',
+                    count: 870, uniques: 410
+                },
+                {
+                    path: '/DazzleML/comfyui-triton-and-sageattention-installer/releases',
+                    // Triple-encoded middot to exercise the triple-encode cleanup path
+                    title: 'Releases \u00c3\u201a\u00c2\u00b7 DazzleML/comfyui-triton-and-sageattention-installer',
+                    count: 340, uniques: 210
+                }
+            ],
+            ciCheckouts: (function() {
+                var ci = {};
+                // Day 24: high CI
+                ci[daysAgoDate(24)] = {
+                    total: 40,
+                    byWorkflow: {
+                        'CI': { runs: 8, checkoutsPerRun: [5, 5, 5, 5, 5, 5, 5, 5] }
+                    }
+                };
+                // Day 2: another high CI day
+                ci[daysAgoDate(2)] = {
+                    total: 40,
+                    byWorkflow: {
+                        'CI': { runs: 8, checkoutsPerRun: [5, 5, 5, 5, 5, 5, 5, 5] }
+                    }
+                };
+                // Sprinkle zero-CI days so the table renders the quiet-days summary row
+                ci[daysAgoDate(1)] = { total: 0 };
+                ci[daysAgoDate(0)] = { total: 0 };
+                return ci;
+            })(),
+            dailyHistory: history
+        };
+    }
+
+    // --- Build archive data (two months of older history) ---
+    function buildArchiveData() {
+        // Simulates the gist API response for the archive gist
+        // The dashboard looks for files matching /^archive-\d{4}-\d{2}\.json$/
+        // and fetches each file's raw_url, expecting { dailyHistory: [...] }
+        // We intercept those raw_url fetches and serve our content directly.
+
+        var dec2025 = buildMonthHistory('2025-12', 31, {
+            baseClones: 15, baseViews: 120, baseStars: 31, baseForks: 1, baseIssues: 1,
+            // Old format: no uniqueClones, no organicClones, no ciCheckouts
+            includeUnique: false, includeCIFields: false
+        });
+
+        var jan2026 = buildMonthHistory('2026-01', 16, {
+            baseClones: 15, baseViews: 120, baseStars: 58, baseForks: 2, baseIssues: 3,
+            // Old format: no uniqueClones, no ciCheckouts
+            includeUnique: false, includeCIFields: false
+        });
+
+        return {
+            dec2025: { dailyHistory: dec2025 },
+            jan2026: { dailyHistory: jan2026 }
+        };
+    }
+
+    function buildMonthHistory(yyyyMM, days, opts) {
+        var result = [];
+        var year = parseInt(yyyyMM.slice(0, 4));
+        var month = parseInt(yyyyMM.slice(5, 7)) - 1; // 0-based
+
+        for (var d = 1; d <= days; d++) {
+            // Seed-based pseudo-random to get stable values
+            var seed = year * 1000 + month * 100 + d;
+            var rng = function(min, max) {
+                seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+                return min + (seed % (max - min + 1));
+            };
+
+            var clones = rng(opts.baseClones - 5, opts.baseClones + 15);
+            var views = rng(opts.baseViews - 30, opts.baseViews + 80);
+            var dl = rng(0, 2);
+            var stars = opts.baseStars + Math.floor((d / days) * 5);
+
+            var entry = {
+                date: yyyyMM + '-' + String(d).padStart(2, '0') + 'T00:00:00Z',
+                clones: Math.max(0, clones),
+                views: Math.max(0, views),
+                downloads: dl,
+                stars: stars,
+                forks: opts.baseForks,
+                openIssues: opts.baseIssues,
+                total: Math.max(0, clones)
+            };
+
+            if (!opts.includeCIFields) {
+                // Old format: no ciCheckouts, no organicClones fields
+            } else {
+                entry.ciCheckouts = 0;
+                entry.organicClones = entry.clones;
+            }
+
+            if (opts.includeUnique) {
+                entry.uniqueClones = Math.round(entry.clones * 0.75);
+                entry.uniqueViews = Math.round(entry.views * 0.48);
+            }
+
+            result.push(entry);
+        }
+        return result;
+    }
+
+    // -----------------------------------------------------------------------
+    // TEST SCENARIO CONTROL
+    // -----------------------------------------------------------------------
+
+    var currentScenario = 'all';
+    var testStateData = buildStateData();
+    var testArchiveData = buildArchiveData();
+
+    window.selectScenario = function(scenario) {
+        currentScenario = scenario;
+        // Update pill styles
+        document.querySelectorAll('.test-pill').forEach(function(p) {
+            p.classList.remove('active');
+        });
+        var pill = document.getElementById('pill-' + scenario);
+        if (pill) pill.classList.add('active');
+
+        testLog('info', 'Scenario switched to: ' + scenario + '. Reloading dashboard...');
+
+        // Reset rendered flags and cached archive
+        viewsRendered = false;
+        communityRendered = false;
+        overviewRendered = false;
+        devRendered = false;
+        archiveData = null;
+
+        loadDashboard();
+    };
+
+    window.toggleLog = function() {
+        var log = document.getElementById('test-log');
+        log.classList.toggle('visible');
+        var pill = document.getElementById('pill-log');
+        pill.classList.toggle('active', log.classList.contains('visible'));
+    };
+
+    var logCount = 0;
+    function testLog(type, msg) {
+        var body = document.getElementById('test-log-body');
+        logCount++;
+        var entry = document.createElement('div');
+        entry.className = 'log-entry log-' + type;
+        entry.textContent = '[' + logCount + '] ' + msg;
+        body.appendChild(entry);
+        body.scrollTop = body.scrollHeight;
+        console.log('[TEST ' + type.toUpperCase() + '] ' + msg);
+    }
+
+    // -----------------------------------------------------------------------
+    // FETCH INTERCEPTOR
+    // Install BEFORE the dashboard code runs.
+    // -----------------------------------------------------------------------
+
+    var originalFetch = window.fetch.bind(window);
+
+    // We expose raw_url patterns that the archive fetcher will call
+    var ARCHIVE_RAW_BASE = '__ARCHIVE_RAW_';
+    var STATE_URL_PATTERN = /gist\.githubusercontent\.com.*state\.json/;
+    var ARCHIVE_GIST_API_PATTERN = /api\.github\.com\/gists\//;
+    var ARCHIVE_RAW_DEC = '__ARCHIVE_RAW_2025_12__';
+    var ARCHIVE_RAW_JAN = '__ARCHIVE_RAW_2026_01__';
+    var GITHUB_STATS_PATTERN = /api\.github\.com\/repos\/.*\/stats\//;
+    var GITHUB_STARS_PATTERN = /api\.github\.com\/repos\/.*\/stargazers/;
+
+    window.fetch = function(url, opts) {
+        var urlStr = typeof url === 'string' ? url : (url.url || String(url));
+
+        // -- State JSON --
+        if (STATE_URL_PATTERN.test(urlStr) || urlStr.indexOf('state.json') !== -1) {
+            testLog('ok', 'INTERCEPTED state.json: ' + urlStr.slice(-40));
+            var data = JSON.stringify(testStateData);
+            return Promise.resolve(new Response(data, {
+                status: 200,
+                headers: { 'Content-Type': 'application/json' }
+            }));
+        }
+
+        // -- Archive gist API --
+        if (ARCHIVE_GIST_API_PATTERN.test(urlStr) && urlStr.indexOf('/stats/') === -1) {
+            testLog('ok', 'INTERCEPTED archive gist API: ' + urlStr.slice(-40));
+
+            if (currentScenario === 'no-archive') {
+                // Simulate gist with no archive files
+                testLog('warn', 'Scenario no-archive: returning gist with no archive files');
+                return Promise.resolve(new Response(JSON.stringify({ files: {}, description: 'empty archive' }), {
+                    status: 200,
+                    headers: { 'Content-Type': 'application/json' }
+                }));
+            }
+
+            if (currentScenario === 'archive-error') {
+                testLog('warn', 'Scenario archive-error: returning 403 rate limit');
+                return Promise.resolve(new Response('{"message":"API rate limit exceeded"}', { status: 403 }));
+            }
+
+            // Return gist object with file entries pointing to our fake raw_urls
+            var gistResp = {
+                id: 'b44b12adb623ae3ac8f1993970ab5266',
+                description: 'TEST archive gist',
+                files: {
+                    'archive-2025-12.json': {
+                        filename: 'archive-2025-12.json',
+                        raw_url: ARCHIVE_RAW_DEC,
+                        size: 1000
+                    },
+                    'archive-2026-01.json': {
+                        filename: 'archive-2026-01.json',
+                        raw_url: ARCHIVE_RAW_JAN,
+                        size: 1000
+                    }
+                }
+            };
+            return Promise.resolve(new Response(JSON.stringify(gistResp), {
+                status: 200,
+                headers: { 'Content-Type': 'application/json' }
+            }));
+        }
+
+        // -- Archive raw file fetches (fake raw_url) --
+        if (urlStr === ARCHIVE_RAW_DEC) {
+            testLog('ok', 'INTERCEPTED archive raw: archive-2025-12.json');
+            return Promise.resolve(new Response(JSON.stringify(testArchiveData.dec2025), {
+                status: 200,
+                headers: { 'Content-Type': 'application/json' }
+            }));
+        }
+        if (urlStr === ARCHIVE_RAW_JAN) {
+            testLog('ok', 'INTERCEPTED archive raw: archive-2026-01.json');
+            return Promise.resolve(new Response(JSON.stringify(testArchiveData.jan2026), {
+                status: 200,
+                headers: { 'Content-Type': 'application/json' }
+            }));
+        }
+
+        // -- GitHub Stats API (commit_activity, contributors, etc.) --
+        if (GITHUB_STATS_PATTERN.test(urlStr)) {
+            testLog('info', 'BLOCKED github stats endpoint (test mode): ' + urlStr.split('/').slice(-2).join('/'));
+            // Return empty to trigger the "error" display path
+            return Promise.resolve(new Response('null', { status: 200, headers: { 'Content-Type': 'application/json' } }));
+        }
+
+        // -- GitHub Stargazers API --
+        if (GITHUB_STARS_PATTERN.test(urlStr)) {
+            testLog('info', 'INTERCEPTED stargazers: returning synthetic star history');
+            // Build a small synthetic star history (20 stars over last 60 days)
+            var stars = [];
+            for (var s = 20; s >= 1; s--) {
+                var sd = new Date();
+                sd.setUTCDate(sd.getUTCDate() - (s * 3));
+                stars.push({ starred_at: sd.toISOString(), user: { login: 'testuser' + s } });
+            }
+            return Promise.resolve(new Response(JSON.stringify(stars), {
+                status: 200,
+                headers: { 'Content-Type': 'application/json', 'X-GitHub-Media-Type': 'github.star+json' }
+            }));
+        }
+
+        // -- Pass everything else through (CDN assets, etc.) --
+        testLog('info', 'PASSTHROUGH: ' + urlStr.slice(0, 80));
+        return originalFetch(url, opts);
+    };
+
+    // Export for dashboard access
+    window._testLog = testLog;
+    window._testStateData = testStateData;
+    window._testArchiveData = testArchiveData;
+
+})();
+</script>
+
+<script>
+// =====================================================================
+// REAL DASHBOARD LOGIC (copied verbatim from index.html)
+// Only the configuration constants are changed to point to test data.
+// =====================================================================
+
+// Configuration — URLs match what the fetch interceptor expects
+const GIST_RAW_BASE = 'https://gist.githubusercontent.com/djdarcy/77f23ace7465637447db0a6c79cf46ba/raw';
+const STATE_URL = GIST_RAW_BASE + '/state.json';
+const ARCHIVE_GIST_ID = 'b44b12adb623ae3ac8f1993970ab5266';
+const ARCHIVE_API_URL = 'https://api.github.com/gists/' + ARCHIVE_GIST_ID;
+const REPO_OWNER = 'DazzleML';
+const REPO_NAME = 'comfyui-triton-and-sageattention-installer';
+const REPO_CREATED = '2025-07-23';
+var primaryAuthor = null;
+
+// State
+let currentState = null;
+let charts = {};
+let archiveData = null;
+let starHistory = null;
+
+// ==================== UTILITIES ====================
+
+function fmt(n) { return (n || 0).toLocaleString('en-US'); }
+
+function formatDate(dateStr) {
+    var dt = new Date(dateStr);
+    return dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+}
+
+function formatDateFull(dateStr) {
+    var dt = new Date(dateStr);
+    return dt.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC' });
+}
+
+function show(id) { document.getElementById(id).classList.remove('hidden'); }
+function hide(id) { document.getElementById(id).classList.add('hidden'); }
+function setText(id, text) { document.getElementById(id).textContent = text; }
+
+function sumWindow(history, n, field) {
+    var w = history.slice(-n);
+    if (field) {
+        return w.reduce(function(sum, d) { return sum + (d[field] || 0); }, 0);
+    }
+    return w.reduce(function(sum, d) {
+        return sum + (d.organicClones !== undefined ? d.organicClones : (d.clones || 0)) + (d.downloads || 0);
+    }, 0);
+}
+
+function getOrganicUniqueClones(entry) {
+    if (entry.organicUniqueClones !== undefined) return entry.organicUniqueClones;
+    if (entry.uniqueClones === undefined || entry.uniqueClones === null) return null;
+    var rawUnique = entry.uniqueClones;
+    var ciRate = (entry.clones || 0) > 0 ? entry.ciCheckouts / entry.clones : 0;
+    var ciUniqueByPct = Math.round(rawUnique * ciRate);
+    var ciUniqueCeiling = entry.ciRuns || 0;
+    var ciUniqueClones = Math.min(ciUniqueByPct, ciUniqueCeiling);
+    return Math.max(0, rawUnique - ciUniqueClones);
+}
+
+function projectTrailingZeros(values, dates) {
+    if (!dates || values.length < 2) {
+        return { data: values, projectedFrom: values.length, projectedTo: 0 };
+    }
+
+    var result = values.slice();
+    var projectedTo = 0;
+
+    var firstRealIdx = -1;
+    for (var i = 0; i < result.length; i++) {
+        if (result[i] !== null && result[i] !== undefined) {
+            firstRealIdx = i;
+            break;
+        }
+    }
+    if (firstRealIdx > 0) {
+        for (var i = 0; i < firstRealIdx; i++) {
+            result[i] = result[firstRealIdx];
+        }
+        projectedTo = firstRealIdx;
+    }
+
+    var lastIdx = result.length - 1;
+    var today = new Date().toISOString().slice(0, 10);
+    var lastDate = (dates[lastIdx] || '').slice(0, 10);
+    var projectedFrom = result.length;
+
+    if ((result[lastIdx] === 0 || result[lastIdx] === null) && lastDate === today) {
+        result[lastIdx] = result[lastIdx - 1];
+        if (result[lastIdx] !== 0 && result[lastIdx] !== null) {
+            projectedFrom = lastIdx;
+        }
+    }
+
+    return { data: result, projectedFrom: projectedFrom, projectedTo: projectedTo };
+}
+
+function projectionSegmentConfig(projectedFrom, dataLength, projectedTo) {
+    var hasTrailing = projectedFrom < dataLength;
+    var hasLeading = (projectedTo || 0) > 0;
+    if (!hasTrailing && !hasLeading) return {};
+    var leadEnd = projectedTo || 0;
+    return {
+        borderDash: function(ctx) {
+            if (hasLeading && ctx.p0DataIndex < leadEnd) return [6, 3];
+            if (hasTrailing && ctx.p0DataIndex >= projectedFrom - 1) return [6, 3];
+            return undefined;
+        }
+    };
+}
+
+function destroyChart(canvasId) {
+    if (charts[canvasId]) {
+        charts[canvasId].destroy();
+        charts[canvasId] = null;
+    }
+}
+
+function setDot(id, active) {
+    var dot = document.getElementById(id);
+    dot.className = active ? 'dot active' : 'dot inactive';
+}
+
+function buildChartOptions() {
+    return {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        scales: {
+            x: {
+                ticks: { color: '#8b949e', maxRotation: 45, autoSkip: true, maxTicksLimit: 15 },
+                grid: { color: '#30363d' }
+            },
+            y: {
+                beginAtZero: true,
+                ticks: { color: '#8b949e', precision: 0 },
+                grid: { color: '#30363d' }
+            }
+        },
+        plugins: {
+            legend: {
+                labels: { color: '#e6edf3', usePointStyle: true, pointStyle: 'circle' }
+            },
+            tooltip: {
+                backgroundColor: '#161b22',
+                titleColor: '#e6edf3',
+                bodyColor: '#8b949e',
+                borderColor: '#30363d',
+                borderWidth: 1,
+                padding: 10,
+                callbacks: {
+                    label: function(context) {
+                        return ' ' + context.dataset.label + ': ' + fmt(context.parsed.y);
+                    }
+                }
+            }
+        }
+    };
+}
+
+// ==================== TAB SWITCHING ====================
+
+function switchTab(tabName) {
+    document.querySelectorAll('.tab').forEach(function(t) {
+        t.classList.toggle('active', t.dataset.tab === tabName);
+    });
+    document.querySelectorAll('.tab-content').forEach(function(tc) {
+        tc.classList.toggle('active', tc.id === 'tab-' + tabName);
+    });
+    history.replaceState(null, '', '#' + tabName);
+
+    if (tabName === 'installs' && charts['installsChart']) charts['installsChart'].resize();
+    if (tabName === 'views' && currentState) renderViewsTab();
+    if (tabName === 'community' && currentState) renderCommunityTab();
+    if (tabName === 'overview' && currentState) renderOverviewChart();
+    if (tabName === 'dev' && currentState) renderDevTab();
+}
+
+// ==================== MAIN ENTRY POINT ====================
+
+async function loadDashboard() {
+    hide('error-banner');
+    hide('content');
+    show('loading');
+
+    try {
+        var response = await fetch(STATE_URL + '?t=' + Date.now());
+        if (!response.ok) throw new Error('HTTP ' + response.status);
+        currentState = await response.json();
+
+        if (currentState.dailyHistory) {
+            var seen = {};
+            var deduped = [];
+            for (var i = 0; i < currentState.dailyHistory.length; i++) {
+                var d = currentState.dailyHistory[i];
+                var key = d.date.slice(0, 10);
+                if (seen[key] !== undefined) {
+                    deduped[seen[key]] = d;
+                } else {
+                    seen[key] = deduped.length;
+                    deduped.push(d);
+                }
+            }
+            currentState.dailyHistory = deduped;
+        }
+
+        renderInstallsTab(currentState);
+
+        hide('loading');
+        show('content');
+
+        var hash = window.location.hash.replace('#', '');
+        if (['installs', 'views', 'community', 'overview', 'dev'].indexOf(hash) !== -1) {
+            switchTab(hash);
+        } else {
+            renderOverviewChart();
+        }
+    } catch (err) {
+        hide('loading');
+        show('error-banner');
+        console.error('Failed to load stats:', err);
+    }
+}
+
+// ==================== INSTALLS TAB ====================
+
+function renderInstallsTab(state) {
+    var totalDl = state.totalDownloads || 0;
+    var totalCl = Math.max(0, (state.totalClones || 0) - (state.totalCiCheckouts || 0));
+    var combined = totalDl + totalCl;
+
+    setText('total-installs', fmt(combined));
+    setText('total-downloads', fmt(totalDl));
+    setText('total-clones', fmt(totalCl));
+
+    var dlPct = combined > 0 ? ((totalDl / combined) * 100).toFixed(1) : '0';
+    var clPct = combined > 0 ? ((totalCl / combined) * 100).toFixed(1) : '0';
+    setText('downloads-pct', dlPct + '% of total');
+    setText('clones-pct', clPct + '% of total');
+    setText('clones-unique', fmt(state.totalOrganicUniqueClones || state.totalUniqueClones || 0) + ' tracked unique');
+
+    var history = state.dailyHistory || [];
+    var lastEntry = history.length > 0 ? history[history.length - 1] : {};
+    var last24h = (lastEntry.organicClones !== undefined ? lastEntry.organicClones : (lastEntry.clones || 0)) + (lastEntry.downloads || 0);
+    var lastWeek = sumWindow(history, 7);
+    var lastMonth = sumWindow(history, 31);
+
+    if (last24h > 0) {
+        setText('recent-value', '+' + fmt(last24h));
+        setText('recent-window', 'in the last 24 hours');
+    } else if (lastWeek > 0) {
+        setText('recent-value', '+' + fmt(lastWeek));
+        setText('recent-window', 'in the last 7 days');
+    } else if (lastMonth > 0) {
+        setText('recent-value', '+' + fmt(lastMonth));
+        setText('recent-window', 'in the last 30 days');
+    } else {
+        setText('recent-value', '0');
+        setText('recent-window', 'no recent activity');
+    }
+
+    renderInstallsChart(history);
+
+    setText('val-24h', fmt(last24h));
+    setText('val-7d', fmt(lastWeek));
+    setText('val-30d', fmt(lastMonth));
+    setDot('dot-24h', last24h > 0);
+    setDot('dot-7d', lastWeek > 0);
+    setDot('dot-30d', lastMonth > 0);
+
+    if (history.length > 0) {
+        setText('last-updated', formatDateFull(history[history.length - 1].date));
+    }
+}
+
+function renderInstallsChart(history) {
+    if (typeof Chart === 'undefined') return;
+
+    if (history.length === 0) {
+        show('sparse-data-note');
+        setText('sparse-data-note', 'No data points available yet.');
+        return;
+    }
+
+    if (history.length <= 2) { show('sparse-data-note'); }
+
+    var labels = history.map(function(d) { return formatDate(d.date); });
+    var dates = history.map(function(d) { return d.date; });
+    var clonesProj = projectTrailingZeros(history.map(function(d) { return d.organicClones !== undefined ? d.organicClones : (d.clones || 0); }), dates);
+    var uniqueClonesProj = projectTrailingZeros(history.map(function(d) { return getOrganicUniqueClones(d); }), dates);
+    var downloadsProj = projectTrailingZeros(history.map(function(d) { return d.downloads || 0; }), dates);
+    var clones = clonesProj.data;
+    var uniqueClones = uniqueClonesProj.data;
+    var downloads = downloadsProj.data;
+    var totals = clones.map(function(c, i) { return c + downloads[i]; });
+    var projectedFrom = Math.min(clonesProj.projectedFrom, downloadsProj.projectedFrom);
+    var projectedTo = Math.max(clonesProj.projectedTo, downloadsProj.projectedTo);
+
+    var clonesMatchTotal = totals.every(function(t, i) { return t === clones[i]; });
+    var downloadsMatchTotal = totals.every(function(t, i) { return t === downloads[i]; });
+    var totalBorderWidth = (clonesMatchTotal || downloadsMatchTotal) ? 0 : 2;
+
+    var pointSize = history.length === 1 ? 6 : 3;
+    var smallPoint = history.length === 1 ? 6 : 2;
+
+    destroyChart('installsChart');
+    var ctx = document.getElementById('installsChart').getContext('2d');
+
+    charts['installsChart'] = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: labels,
+            datasets: [
+                {
+                    label: 'Total',
+                    data: totals,
+                    borderColor: totalBorderWidth > 0 ? '#58a6ff' : 'transparent',
+                    backgroundColor: 'rgba(88, 166, 255, 0.1)',
+                    fill: true, tension: 0.3,
+                    pointRadius: totalBorderWidth > 0 ? pointSize : 0,
+                    pointHoverRadius: totalBorderWidth > 0 ? pointSize + 2 : 0,
+                    borderWidth: totalBorderWidth,
+                    segment: projectionSegmentConfig(projectedFrom, totals.length, projectedTo),
+                    order: 2
+                },
+                {
+                    label: 'Clones', data: clones, borderColor: '#bc8cff',
+                    backgroundColor: 'transparent', fill: false, tension: 0.3,
+                    pointRadius: 1, pointHoverRadius: 3, borderWidth: 1.5, borderDash: [4, 2],
+                    segment: projectionSegmentConfig(clonesProj.projectedFrom, clones.length, clonesProj.projectedTo),
+                    order: 1
+                },
+                {
+                    label: 'Unique Clones', data: uniqueClones, borderColor: '#d4b8ff',
+                    backgroundColor: 'transparent', fill: false, tension: 0.3,
+                    pointRadius: smallPoint, pointHoverRadius: smallPoint + 2, borderWidth: 2,
+                    segment: projectionSegmentConfig(uniqueClonesProj.projectedFrom, uniqueClones.length, uniqueClonesProj.projectedTo),
+                    order: 1
+                },
+                {
+                    label: 'Downloads', data: downloads, borderColor: '#3fb950',
+                    backgroundColor: 'transparent', fill: false, tension: 0.3,
+                    pointRadius: smallPoint, pointHoverRadius: smallPoint + 2, borderWidth: 2,
+                    segment: projectionSegmentConfig(downloadsProj.projectedFrom, downloads.length, downloadsProj.projectedTo),
+                    order: 1
+                }
+            ]
+        },
+        options: buildChartOptions()
+    });
+}
+
+function showInstallsRecent() {
+    if (!currentState) return;
+    document.getElementById('btn-installs-recent').classList.add('active');
+    document.getElementById('btn-installs-all').classList.remove('active');
+    setText('installs-chart-note', '(rolling 31-day window)');
+    hide('installs-archive-note');
+    hide('installs-archive-loading');
+    renderInstallsChart(currentState.dailyHistory || []);
+}
+
+async function showInstallsAll() {
+    if (!currentState) return;
+    document.getElementById('btn-installs-all').classList.add('active');
+    document.getElementById('btn-installs-recent').classList.remove('active');
+
+    if (archiveData) {
+        renderFullInstallsHistory();
+        return;
+    }
+
+    show('installs-archive-loading');
+    hide('installs-archive-note');
+
+    try {
+        var response = await fetch(ARCHIVE_API_URL);
+        if (!response.ok) {
+            if (response.status === 404) throw new Error('Archive gist not found');
+            if (response.status === 403) throw new Error('GitHub API rate limit reached. Try again later.');
+            throw new Error('HTTP ' + response.status);
+        }
+
+        var gist = await response.json();
+        var archiveFiles = [];
+
+        for (var filename in gist.files) {
+            if (filename.match(/^archive-\d{4}-\d{2}\.json$/)) {
+                archiveFiles.push(gist.files[filename]);
+            }
+        }
+
+        if (archiveFiles.length === 0) {
+            hide('installs-archive-loading');
+            show('installs-archive-note');
+            setText('installs-archive-note', 'No archived monthly data yet. Monthly archives begin on the 1st of each month. Showing current rolling window.');
+            setText('installs-chart-note', '(all available data)');
+            renderInstallsChart(currentState.dailyHistory || []);
+            return;
+        }
+
+        var allHistory = [];
+        for (var i = 0; i < archiveFiles.length; i++) {
+            try {
+                var rawUrl = archiveFiles[i].raw_url;
+                var archiveResp = await fetch(rawUrl);
+                if (archiveResp.ok) {
+                    var archiveContent = await archiveResp.json();
+                    if (archiveContent.dailyHistory && archiveContent.dailyHistory.length > 0) {
+                        allHistory = allHistory.concat(archiveContent.dailyHistory);
+                    }
+                }
+            } catch (e) {
+                console.warn('Failed to load archive file:', archiveFiles[i].filename, e);
+            }
+        }
+
+        var currentHistory = currentState.dailyHistory || [];
+        allHistory = allHistory.concat(currentHistory);
+
+        var seen = {};
+        var deduplicated = [];
+        for (var j = 0; j < allHistory.length; j++) {
+            var dateKey = allHistory[j].date.slice(0, 10);
+            if (!seen[dateKey]) {
+                seen[dateKey] = true;
+                deduplicated.push(allHistory[j]);
+            }
+        }
+
+        deduplicated.sort(function(a, b) { return new Date(a.date) - new Date(b.date); });
+
+        archiveData = deduplicated;
+        renderFullInstallsHistory();
+
+    } catch (err) {
+        hide('installs-archive-loading');
+        show('installs-archive-note');
+        setText('installs-archive-note', 'Could not load historical data: ' + err.message + '. Showing current rolling window.');
+        renderInstallsChart(currentState.dailyHistory || []);
+    }
+}
+
+function renderFullInstallsHistory() {
+    hide('installs-archive-loading');
+    var data = archiveData || (currentState ? currentState.dailyHistory : []) || [];
+    var months = data.length > 0
+        ? Math.ceil((new Date(data[data.length - 1].date) - new Date(data[0].date)) / (1000 * 60 * 60 * 24 * 30))
+        : 0;
+    var label = data.length + ' data points';
+    if (months > 1) label += ' over ~' + months + ' months';
+    setText('installs-chart-note', '(' + label + ')');
+
+    if (archiveData && archiveData.length > (currentState.dailyHistory || []).length) {
+        show('installs-archive-note');
+        setText('installs-archive-note', 'Showing all available historical data including monthly archives.');
+    } else {
+        show('installs-archive-note');
+        setText('installs-archive-note', 'No additional archived data found beyond the current rolling window.');
+    }
+
+    renderInstallsChart(data);
+}
+
+// ==================== VIEWS TAB ====================
+
+var viewsRendered = false;
+
+function renderViewsTab() {
+    if (viewsRendered) return;
+    viewsRendered = true;
+
+    var state = currentState;
+    var totalViews = state.totalViews || 0;
+    var history = state.dailyHistory || [];
+    var referrers = state.referrers || [];
+
+    setText('total-views', fmt(totalViews));
+    setText('total-views-unique', fmt(state.totalUniqueViews || 0) + ' unique visitors');
+
+    var todayViews = 0, todayUniqueViews = 0, todayLabel = 'latest data point';
+    for (var i = history.length - 1; i >= 0; i--) {
+        if ((history[i].views || 0) > 0) {
+            todayViews = history[i].views;
+            todayUniqueViews = history[i].uniqueViews || 0;
+            if (i < history.length - 1) todayLabel = formatDate(history[i].date);
+            break;
+        }
+    }
+    setText('today-views', fmt(todayViews));
+    setText('today-views-sub', todayLabel + (todayUniqueViews > 0 ? ' \u00b7 ' + fmt(todayUniqueViews) + ' unique' : ''));
+
+    var weekViews = sumWindow(history, 7, 'views');
+    setText('week-views', fmt(weekViews));
+
+    if (referrers.length > 0) {
+        setText('top-referrer', referrers[0].source);
+        setText('top-referrer-count', fmt(referrers[0].count) + ' views (' + fmt(referrers[0].uniques) + ' unique)');
+    } else {
+        setText('top-referrer', 'N/A');
+        setText('top-referrer-count', 'no data yet');
+    }
+
+    renderViewsChart(history);
+    renderReferrersTable(referrers);
+    renderPopularPaths(state.popularPaths || []);
+}
+
+function renderViewsChart(history) {
+    if (typeof Chart === 'undefined') return;
+    if (history.length === 0) return;
+
+    var labels = history.map(function(d) { return formatDate(d.date); });
+    var dates = history.map(function(d) { return d.date; });
+    var viewsRaw = history.map(function(d) { return d.views || 0; });
+    var uniqueViewsRaw = history.map(function(d) { return d.uniqueViews !== undefined ? d.uniqueViews : null; });
+    var proj = projectTrailingZeros(viewsRaw, dates);
+    var uniqueProj = projectTrailingZeros(uniqueViewsRaw, dates);
+    var hasProjection = proj.projectedFrom < proj.data.length;
+
+    setText('views-chart-note', '(' + history.length + ' days)');
+
+    destroyChart('viewsChart');
+    var ctx = document.getElementById('viewsChart').getContext('2d');
+
+    var dataset = {
+        label: 'Page Views', data: proj.data,
+        borderColor: '#58a6ff', backgroundColor: 'rgba(88, 166, 255, 0.1)',
+        fill: true, tension: 0.3, pointRadius: 1, pointHoverRadius: 3,
+        borderWidth: 1.5, borderDash: [4, 2]
+    };
+    dataset.segment = projectionSegmentConfig(proj.projectedFrom, proj.data.length, proj.projectedTo);
+
+    var uniqueDataset = {
+        label: 'Unique Views', data: uniqueProj.data,
+        borderColor: '#8ec5ff', backgroundColor: 'transparent',
+        fill: false, tension: 0.3,
+        pointRadius: function(ctx) { return hasProjection && ctx.dataIndex >= uniqueProj.projectedFrom ? 4 : 3; },
+        pointStyle: function(ctx) { return hasProjection && ctx.dataIndex >= uniqueProj.projectedFrom ? 'rectRot' : 'circle'; },
+        pointHoverRadius: 5, borderWidth: 2,
+        segment: projectionSegmentConfig(uniqueProj.projectedFrom, uniqueProj.data.length, uniqueProj.projectedTo),
+        order: 1
+    };
+
+    charts['viewsChart'] = new Chart(ctx, {
+        type: 'line',
+        data: { labels: labels, datasets: [dataset, uniqueDataset] },
+        options: buildChartOptions()
+    });
+}
+
+var REFERRER_ANNOTATIONS = {
+    'com.reddit.frontpage': 'Reddit mobile app',
+    'com.google.android.googlequicksearchbox': 'Google app (Android)',
+    't.co': 'Twitter/X link shortener',
+    'out.reddit.com': 'Reddit outbound link'
+};
+
+function getReferrerAnnotation(source) {
+    var lower = source.toLowerCase();
+    if (REFERRER_ANNOTATIONS[lower]) return REFERRER_ANNOTATIONS[lower];
+    if (/^com\.|^org\.|^net\./.test(lower) && lower.indexOf('.') > 0 && lower.split('.').length >= 3) {
+        return 'mobile app';
+    }
+    return null;
+}
+
+function renderReferrersTable(referrers) {
+    var tbody = document.getElementById('referrers-body');
+    if (referrers.length === 0) return;
+
+    var maxCount = referrers[0].count || 1;
+    var html = '';
+    for (var i = 0; i < referrers.length; i++) {
+        var r = referrers[i];
+        var barWidth = Math.max(4, (r.count / maxCount) * 100);
+        var annotation = getReferrerAnnotation(r.source);
+        html += '<tr><td class="rank">' + (i + 1) + '</td><td>' + escapeHtml(r.source);
+        if (annotation) html += ' <span style="color: var(--text-secondary); font-size: 0.75rem; font-style: italic;">(' + escapeHtml(annotation) + ')</span>';
+        html += '<div class="referrer-bar" style="width:' + barWidth + '%"></div></td>';
+        html += '<td>' + fmt(r.count) + '</td><td>' + fmt(r.uniques) + '</td></tr>';
+    }
+    tbody.innerHTML = html;
+}
+
+function renderPopularPaths(paths) {
+    var tbody = document.getElementById('paths-body');
+    if (!paths || paths.length === 0) return;
+
+    var repoPrefix = '';
+    if (paths.length > 0) {
+        var parts = paths[0].path.split('/').filter(Boolean);
+        if (parts.length >= 2) repoPrefix = '/' + parts[0] + '/' + parts[1];
+    }
+
+    var maxCount = paths[0].count || 1;
+    var html = '';
+
+    for (var i = 0; i < paths.length; i++) {
+        var p = paths[i];
+        var barWidth = Math.max(4, (p.count / maxCount) * 100);
+        var cleanPath = p.path;
+        if (repoPrefix && cleanPath.indexOf(repoPrefix) === 0) {
+            cleanPath = cleanPath.slice(repoPrefix.length) || '/';
+        }
+        var title = (p.title || '')
+            .replace(/\u00c3\u201a\u00c2\u00b7/g, ' - ')
+            .replace(/\u00c2\u00b7/g, '\u00b7')
+            .replace(/\s*\u00b7\s*/g, ' - ')
+            .replace(/\.\.\.$/, '')
+            .trim();
+
+        var label;
+        if (cleanPath === '/') label = 'Repository Home';
+        else if (title && title.length > 0) label = title;
+        else label = cleanPath;
+
+        var showPath = label !== cleanPath && cleanPath !== '/';
+
+        html += '<tr><td class="rank">' + (i + 1) + '</td>';
+        var pageUrl = 'https://github.com' + p.path;
+        html += '<td title="' + escapeHtml(p.path) + '">';
+        html += '<a href="' + escapeHtml(pageUrl) + '" target="_blank" style="color: var(--accent-blue); text-decoration: none;">' + escapeHtml(label) + '</a>';
+        if (showPath) html += '<div class="path-text">' + escapeHtml(cleanPath) + '</div>';
+        html += '<div class="referrer-bar" style="width:' + barWidth + '%"></div></td>';
+        html += '<td>' + fmt(p.count) + '</td><td>' + fmt(p.uniques) + '</td></tr>';
+    }
+    tbody.innerHTML = html;
+}
+
+function escapeHtml(text) {
+    var div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+// ==================== COMMUNITY TAB ====================
+
+var communityRendered = false;
+
+function renderCommunityTab() {
+    if (communityRendered) return;
+    communityRendered = true;
+
+    var state = currentState;
+    setText('stat-stars', fmt(state.stars || 0));
+    setText('stat-forks', fmt(state.forks || 0));
+    setText('stat-issues', fmt(state.openIssues || 0));
+
+    var created = new Date(REPO_CREATED);
+    var now = new Date();
+    var months = Math.floor((now - created) / (1000 * 60 * 60 * 24 * 30));
+    if (months >= 12) {
+        var years = Math.floor(months / 12);
+        var rem = months % 12;
+        setText('stat-age', years + 'y ' + rem + 'mo');
+    } else {
+        setText('stat-age', months + ' mo');
+    }
+
+    fetchStarHistory();
+    renderCommunityTrends(state.dailyHistory || []);
+}
+
+async function fetchStarHistory() {
+    var cached = sessionStorage.getItem('starHistory_test');
+    if (cached) {
+        try {
+            starHistory = JSON.parse(cached);
+            renderStarChart();
+            return;
+        } catch (e) {}
+    }
+
+    try {
+        var stars = [];
+        var page = 1;
+        var perPage = 100;
+        var done = false;
+        while (!done) {
+            var url = 'https://api.github.com/repos/' + REPO_OWNER + '/' + REPO_NAME + '/stargazers?per_page=' + perPage + '&page=' + page;
+            var resp = await fetch(url, { headers: { 'Accept': 'application/vnd.github.star+json' } });
+            if (resp.status === 403) throw new Error('GitHub API rate limit reached');
+            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+            var data = await resp.json();
+            if (data.length === 0) { done = true; break; }
+            for (var i = 0; i < data.length; i++) stars.push(data[i].starred_at);
+            if (data.length < perPage) { done = true; }
+            page++;
+            if (page > 10) break;
+        }
+        stars.sort();
+        starHistory = stars;
+        sessionStorage.setItem('starHistory_test', JSON.stringify(stars));
+        renderStarChart();
+    } catch (err) {
+        hide('stars-loading');
+        show('stars-note');
+        setText('stars-note', 'Could not load star history: ' + err.message);
+    }
+}
+
+function renderStarChart() {
+    hide('stars-loading');
+    if (!starHistory || starHistory.length === 0) {
+        show('stars-note');
+        setText('stars-note', 'No star data available.');
+        return;
+    }
+    if (typeof Chart === 'undefined') return;
+
+    var dailyStars = {};
+    for (var i = 0; i < starHistory.length; i++) {
+        var dateKey = starHistory[i].slice(0, 10);
+        dailyStars[dateKey] = (dailyStars[dateKey] || 0) + 1;
+    }
+
+    var dates = Object.keys(dailyStars).sort();
+    var labels = dates.map(function(d) { return formatDate(d); });
+    var cumulative = [];
+    var running = 0;
+    for (var j = 0; j < dates.length; j++) {
+        running += dailyStars[dates[j]];
+        cumulative.push(running);
+    }
+
+    show('stars-note');
+    setText('stars-note', starHistory.length + ' stars tracked from ' + formatDateFull(dates[0]) + ' to ' + formatDateFull(dates[dates.length - 1]));
+
+    destroyChart('starsChart');
+    var ctx = document.getElementById('starsChart').getContext('2d');
+    charts['starsChart'] = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: 'Stars', data: cumulative,
+                borderColor: '#d29922', backgroundColor: 'rgba(210, 153, 34, 0.1)',
+                fill: true, tension: 0.3,
+                pointRadius: cumulative.length > 50 ? 0 : 3,
+                pointHoverRadius: 5, borderWidth: 2
+            }]
+        },
+        options: buildChartOptions()
+    });
+}
+
+function renderCommunityTrends(history) {
+    if (typeof Chart === 'undefined') return;
+
+    var withData = history.filter(function(d) {
+        return d.stars !== undefined || d.forks !== undefined || d.openIssues !== undefined;
+    });
+
+    if (withData.length < 2) {
+        show('community-trends-note');
+        setText('community-trends-note', 'Community trend data will appear after the workflow collects daily snapshots. Currently ' + withData.length + ' data point(s).');
+        return;
+    }
+
+    var labels = withData.map(function(d) { return formatDate(d.date); });
+
+    destroyChart('communityTrendsChart');
+    var ctx = document.getElementById('communityTrendsChart').getContext('2d');
+    charts['communityTrendsChart'] = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: labels,
+            datasets: [
+                { label: 'Stars', data: withData.map(function(d) { return d.stars || 0; }), borderColor: '#d29922', backgroundColor: 'transparent', fill: false, tension: 0.3, pointRadius: 3, pointHoverRadius: 5, borderWidth: 2, yAxisID: 'y' },
+                { label: 'Forks', data: withData.map(function(d) { return d.forks || 0; }), borderColor: '#bc8cff', backgroundColor: 'transparent', fill: false, tension: 0.3, pointRadius: 3, pointHoverRadius: 5, borderWidth: 2, yAxisID: 'y2' },
+                { label: 'Open Issues', data: withData.map(function(d) { return d.openIssues || 0; }), borderColor: '#3fb950', backgroundColor: 'transparent', fill: false, tension: 0.3, pointRadius: 3, pointHoverRadius: 5, borderWidth: 2, yAxisID: 'y2' }
+            ]
+        },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            scales: {
+                x: { ticks: { color: '#8b949e', maxRotation: 45 }, grid: { color: '#30363d' } },
+                y: { type: 'linear', position: 'left', beginAtZero: false, title: { display: true, text: 'Stars', color: '#d29922' }, ticks: { color: '#8b949e', precision: 0 }, grid: { color: '#30363d' } },
+                y2: { type: 'linear', position: 'right', beginAtZero: true, title: { display: true, text: 'Forks / Issues', color: '#8b949e' }, ticks: { color: '#8b949e', precision: 0 }, grid: { drawOnChartArea: false } }
+            },
+            plugins: {
+                legend: { labels: { color: '#e6edf3', usePointStyle: true, pointStyle: 'circle' } },
+                tooltip: { backgroundColor: '#161b22', titleColor: '#e6edf3', bodyColor: '#8b949e', borderColor: '#30363d', borderWidth: 1, padding: 10, callbacks: { label: function(context) { return ' ' + context.dataset.label + ': ' + fmt(context.parsed.y); } } }
+            }
+        }
+    });
+}
+
+// ==================== OVERVIEW TAB ====================
+
+var overviewRendered = false;
+
+function renderOverviewChart() {
+    var state = currentState;
+    if (!state) return;
+
+    var history = state.dailyHistory || [];
+    if (history.length === 0) return;
+    if (typeof Chart === 'undefined') return;
+
+    var combined = (state.totalDownloads || 0) + Math.max(0, (state.totalClones || 0) - (state.totalCiCheckouts || 0));
+    setText('ov-installs', fmt(combined));
+    setText('ov-views', fmt(state.totalViews || 0));
+    setText('ov-installs-unique', fmt(state.totalOrganicUniqueClones || state.totalUniqueClones || 0) + ' tracked unique cloners');
+    setText('ov-views-unique', fmt(state.totalUniqueViews || 0) + ' unique viewers');
+    setText('ov-stars', fmt(state.stars || 0));
+    setText('ov-forks', fmt(state.forks || 0));
+
+    var labels = history.map(function(d) { return formatDate(d.date); });
+    var dates = history.map(function(d) { return d.date; });
+    var datasets = [];
+
+    var showViews = document.getElementById('ov-toggle-views').checked;
+    var showClones = document.getElementById('ov-toggle-clones').checked;
+    var showDownloads = document.getElementById('ov-toggle-downloads').checked;
+    var showInstalls = document.getElementById('ov-toggle-installs').checked;
+    var showUniqueClones = document.getElementById('ov-toggle-unique-clones').checked;
+    var showUniqueViews = document.getElementById('ov-toggle-unique-views').checked;
+
+    if (showInstalls) {
+        var installsProj = projectTrailingZeros(history.map(function(d) { return (d.organicClones !== undefined ? d.organicClones : (d.clones || 0)) + (d.downloads || 0); }), dates);
+        datasets.push({ label: 'Total Installs', data: installsProj.data, borderColor: 'transparent', backgroundColor: 'rgba(88, 166, 255, 0.12)', fill: true, tension: 0.3, pointRadius: 0, borderWidth: 0, segment: projectionSegmentConfig(installsProj.projectedFrom, installsProj.data.length, installsProj.projectedTo), order: 3 });
+    }
+    if (showViews) {
+        var viewsProj = projectTrailingZeros(history.map(function(d) { return d.views || 0; }), dates);
+        datasets.push({ label: 'Views', data: viewsProj.data, borderColor: '#58a6ff', backgroundColor: 'transparent', fill: false, tension: 0.3, pointRadius: 1, pointHoverRadius: 3, borderWidth: 1.5, borderDash: [4, 2], segment: projectionSegmentConfig(viewsProj.projectedFrom, viewsProj.data.length, viewsProj.projectedTo), order: 1 });
+    }
+    if (showClones) {
+        var clonesProj2 = projectTrailingZeros(history.map(function(d) { return d.organicClones !== undefined ? d.organicClones : (d.clones || 0); }), dates);
+        datasets.push({ label: 'Clones', data: clonesProj2.data, borderColor: '#bc8cff', backgroundColor: 'transparent', fill: false, tension: 0.3, pointRadius: 1, pointHoverRadius: 3, borderWidth: 1.5, borderDash: [4, 2], segment: projectionSegmentConfig(clonesProj2.projectedFrom, clonesProj2.data.length, clonesProj2.projectedTo), order: 1 });
+    }
+    if (showDownloads) {
+        var downloadsProj2 = projectTrailingZeros(history.map(function(d) { return d.downloads || 0; }), dates);
+        datasets.push({ label: 'Downloads', data: downloadsProj2.data, borderColor: '#3fb950', backgroundColor: 'transparent', fill: false, tension: 0.3, pointRadius: 2, pointHoverRadius: 4, borderWidth: 2, segment: projectionSegmentConfig(downloadsProj2.projectedFrom, downloadsProj2.data.length, downloadsProj2.projectedTo), order: 1 });
+    }
+    if (showUniqueClones) {
+        var uClonesProj = projectTrailingZeros(history.map(function(d) { return getOrganicUniqueClones(d); }), dates);
+        datasets.push({ label: 'Unique Clones', data: uClonesProj.data, borderColor: '#d4b8ff', backgroundColor: 'transparent', fill: false, tension: 0.3, pointRadius: 2, pointHoverRadius: 4, borderWidth: 2, segment: projectionSegmentConfig(uClonesProj.projectedFrom, uClonesProj.data.length, uClonesProj.projectedTo), order: 1 });
+    }
+    if (showUniqueViews) {
+        var uViewsProj = projectTrailingZeros(history.map(function(d) { return d.uniqueViews !== undefined ? d.uniqueViews : null; }), dates);
+        datasets.push({ label: 'Unique Views', data: uViewsProj.data, borderColor: '#8ec5ff', backgroundColor: 'transparent', fill: false, tension: 0.3, pointRadius: 2, pointHoverRadius: 4, borderWidth: 2, segment: projectionSegmentConfig(uViewsProj.projectedFrom, uViewsProj.data.length, uViewsProj.projectedTo), order: 1 });
+    }
+
+    destroyChart('overviewChart');
+    var ctx = document.getElementById('overviewChart').getContext('2d');
+    charts['overviewChart'] = new Chart(ctx, {
+        type: 'line',
+        data: { labels: labels, datasets: datasets },
+        options: buildChartOptions()
+    });
+
+    overviewRendered = true;
+}
+
+// ==================== DEV TAB ====================
+
+var devRendered = false;
+
+function renderDevTab() {
+    if (devRendered) return;
+    devRendered = true;
+
+    var state = currentState;
+    var history = state.dailyHistory || [];
+
+    var rawClones = state.totalClones || 0;
+    var ciCheckouts = state.totalCiCheckouts || 0;
+    var organicClones = Math.max(0, rawClones - ciCheckouts);
+
+    var trackedRaw = 0, trackedCi = 0;
+    for (var t = 0; t < history.length; t++) {
+        if (history[t].organicClones !== undefined) {
+            trackedRaw += (history[t].clones || 0);
+            trackedCi += (history[t].ciCheckouts || 0);
+        }
+    }
+    var ciRate = trackedRaw > 0 ? ((trackedCi / trackedRaw) * 100).toFixed(1) : '0.0';
+
+    setText('dev-raw-clones', fmt(rawClones));
+    setText('dev-ci-checkouts', fmt(ciCheckouts));
+    setText('dev-organic-clones', fmt(organicClones));
+    setText('dev-unique-clones', fmt(state.totalUniqueClones || 0) + ' unique cloners');
+    setText('dev-ci-rate', ciRate + '% of tracked');
+
+    var lastCapture = null;
+    for (var i = history.length - 1; i >= 0; i--) {
+        if (history[i].capturedAt) {
+            lastCapture = new Date(history[i].capturedAt);
+            break;
+        }
+    }
+    if (lastCapture) {
+        var hoursAgo = Math.floor((Date.now() - lastCapture.getTime()) / (1000 * 60 * 60));
+        setText('dev-freshness', hoursAgo < 1 ? '<1h ago' : hoursAgo + 'h ago');
+        setText('dev-capture-time', lastCapture.toISOString().replace('T', ' ').slice(0, 19) + ' UTC');
+        var dot = document.getElementById('dev-health-dot');
+        dot.className = hoursAgo < 30 ? 'dot active' : (hoursAgo < 48 ? 'dot warning' : 'dot inactive');
+    } else {
+        setText('dev-freshness', 'N/A');
+        setText('dev-capture-time', 'no capturedAt data');
+    }
+
+    renderDevChart(history);
+    renderCiTable(state.ciCheckouts || {});
+    // Note: fetchDevStatistics() is intentionally omitted — GitHub stats
+    // endpoints are blocked by the fetch interceptor in test mode.
+}
+
+function renderDevChart(history) {
+    if (typeof Chart === 'undefined' || history.length === 0) return;
+
+    var labels = history.map(function(d) { return formatDate(d.date); });
+    var dates = history.map(function(d) { return d.date; });
+    var rawLine = history.map(function(d) { return d.clones || 0; });
+    var organicLine = history.map(function(d) { return d.organicClones !== undefined ? d.organicClones : (d.clones || 0); });
+    var rawUniqueLine = history.map(function(d) { return d.uniqueClones !== undefined ? d.uniqueClones : null; });
+    var organicUniqueLine = history.map(function(d) { return getOrganicUniqueClones(d); });
+
+    var rawProj = projectTrailingZeros(rawLine, dates);
+    var organicProj = projectTrailingZeros(organicLine, dates);
+    var rawUniqueProj = projectTrailingZeros(rawUniqueLine, dates);
+    var organicUniqueProj = projectTrailingZeros(organicUniqueLine, dates);
+
+    destroyChart('devChart');
+    var ctx = document.getElementById('devChart').getContext('2d');
+    charts['devChart'] = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: labels,
+            datasets: [
+                { label: 'Raw Clones', data: rawProj.data, borderColor: '#d29922', backgroundColor: 'rgba(210, 153, 34, 0.08)', fill: true, tension: 0.3, pointRadius: 2, pointHoverRadius: 4, borderWidth: 2, segment: projectionSegmentConfig(rawProj.projectedFrom, rawProj.data.length, rawProj.projectedTo), order: 4 },
+                { label: 'Organic Clones', data: organicProj.data, borderColor: '#3fb950', backgroundColor: 'transparent', fill: false, tension: 0.3, pointRadius: 2, pointHoverRadius: 4, borderWidth: 2, segment: projectionSegmentConfig(organicProj.projectedFrom, organicProj.data.length, organicProj.projectedTo), order: 3 },
+                { label: 'Raw Unique Clones', data: rawUniqueProj.data, borderColor: '#d4b8ff', backgroundColor: 'transparent', fill: false, tension: 0.3, pointRadius: 1, pointHoverRadius: 3, borderWidth: 1.5, borderDash: [4, 2], segment: projectionSegmentConfig(rawUniqueProj.projectedFrom, rawUniqueProj.data.length, rawUniqueProj.projectedTo), order: 2 },
+                { label: 'Organic Unique Clones', data: organicUniqueProj.data, borderColor: '#d4b8ff', backgroundColor: 'transparent', fill: false, tension: 0.3, pointRadius: 2, pointHoverRadius: 4, borderWidth: 2, segment: projectionSegmentConfig(organicUniqueProj.projectedFrom, organicUniqueProj.data.length, organicUniqueProj.projectedTo), order: 1 }
+            ]
+        },
+        options: buildChartOptions()
+    });
+}
+
+function renderCiTable(ciMap) {
+    var ciDates = Object.keys(ciMap).sort().reverse();
+    if (ciDates.length === 0) return;
+
+    var activeDays = [], zeroDays = [];
+    for (var j = 0; j < ciDates.length; j++) {
+        var entry = ciMap[ciDates[j]];
+        if (entry.total > 0) activeDays.push(ciDates[j]);
+        else zeroDays.push(ciDates[j]);
+    }
+
+    if (activeDays.length === 0) return;
+
+    var tbody = document.getElementById('ci-breakdown-body');
+    var html = '';
+
+    for (var j = 0; j < activeDays.length; j++) {
+        var d = activeDays[j];
+        var entry = ciMap[d];
+        var wfParts = [];
+        if (entry.byWorkflow) {
+            for (var wf in entry.byWorkflow) {
+                var info = entry.byWorkflow[wf];
+                var perRun = info.checkoutsPerRun ? info.checkoutsPerRun.join('+') : '?';
+                wfParts.push(escapeHtml(wf) + ': ' + info.runs + ' run' + (info.runs > 1 ? 's' : '') + ' (' + perRun + ')');
+            }
+        }
+        html += '<tr><td>' + formatDate(d) + '</td><td>' + entry.total + '</td><td style="font-size: 0.8rem;">' + wfParts.join('; ') + '</td></tr>';
+    }
+
+    if (zeroDays.length > 0) {
+        var newest = formatDate(zeroDays[0]);
+        var oldest = formatDate(zeroDays[zeroDays.length - 1]);
+        var quietLabel = zeroDays.length === 1
+            ? 'No CI activity on ' + newest
+            : 'No CI activity: ' + oldest + ' \u2013 ' + newest + ' (' + zeroDays.length + ' days)';
+        html += '<tr><td colspan="3" style="color: var(--text-secondary); font-size: 0.8rem; text-align: center; padding: 0.5rem;">' + quietLabel + '</td></tr>';
+    }
+
+    tbody.innerHTML = html;
+}
+
+// ==================== INIT ====================
+loadDashboard();
+</script>
+</body>
+</html>

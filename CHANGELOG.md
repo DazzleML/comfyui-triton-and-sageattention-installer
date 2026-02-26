@@ -5,6 +5,60 @@ All notable changes to the ComfyUI Triton and SageAttention installer will be do
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.3] - 2026-02-26
+
+Full port of the mature stats system (NCSI v0.7.9–v0.7.11) to the triton workflow and dashboard. Adds CI clone detection, organic clone separation, unique tracking, Dev tab with GitHub Statistics API, and data quality improvements.
+
+### Added (Workflow)
+- **CI clone detection** — Count `actions/checkout` operations per workflow run via Actions API, store `ciCheckouts` and `organicClones` per daily entry
+- **Unique clone/view tracking** — `uniqueClones`, `uniqueViews` per daily entry with cumulative `totalUniqueClones`, `totalUniqueViews`
+- **Organic unique clones** — `organicUniqueClones` per entry using `MIN(round(unique * ciRate), ciRuns)` formula to estimate real unique cloners
+- **CI run tracking** — `ciRuns` field per daily entry counting distinct workflow runs with checkouts
+- **Cumulative CI totals** — `totalCiCheckouts`, `totalCiUniqueClones`, `totalOrganicUniqueClones` via delta accumulation (survives rolling window trim)
+- **Popular paths** — Top 10 visited pages from GitHub Statistics API with middot encoding sanitization
+- **workflow_run trigger** — Fires after CI completes for accurate checkout counting
+- **API-timestamp daily history** — Entries use Traffic API timestamps instead of wall-clock time, preventing cross-day misattribution
+- **Zero-data days** — Explicitly recorded (`clones: 0`) to distinguish "nothing happened" from "script didn't run"
+- **Date normalization** — All daily entries normalized to `YYYY-MM-DDT00:00:00Z` in dedup step
+
+### Added (Dashboard)
+- **Dev tab** — CI audit cards (Raw Clones, CI Checkouts, Organic Clones, Data Freshness), raw vs organic vs unique clone breakdown chart, CI checkout breakdown table, commit activity chart (52 weeks, clickable), code frequency chart, participation chart (maintainer vs community), punch card heat map, contributors list, operational status
+- **Client-side GitHub Statistics API** — `sessionStorage` caching with escalating 202-retry logic and loading indicators per section
+- **Popular Pages table** — Top 10 pages with cleaned API titles, monospace paths, view/unique counts, clickable GitHub links
+- **Referrer mobile app annotations** — `com.reddit.frontpage` → "Reddit mobile app", generic Android package detection
+- **Bidirectional projection** — Dashed lines for both leading gaps (missing historical data) and trailing incomplete data
+- **Dev tab terminology guide** — Collapsible key below Clone Breakdown chart explaining raw vs organic vs unique metrics
+- **Dashboard test harness** — Synthetic data with 11 edge case scenarios for offline validation
+
+### Added (Scripts)
+- `backfill_stats_fields.py` — Initial field migration and unique count backfill
+- `backfill_ciruns.py` — Derive ciRuns from existing `byWorkflow.checkoutsPerRun` data
+- `backfill_organic_unique.py` — Compute organicUniqueClones with cumulative total safety guards
+- `fix_expired_uniques.py` — Remove misleading `uniqueClones: 0` from expired API window entries
+- `verify_stats_migration.py` — Validate gist state after migration
+
+### Changed
+- All user-facing clone numbers use organic counts (CI subtracted); raw kept in state for diagnostics
+- Badge recency suffix uses organic clones for accurate `(+N 24h)` calculation
+- Chart visual hierarchy: unique lines solid (primary signal), raw/total lines dashed
+- Tab order: Overview (default), Installs, Views, Community, Dev — badge `#installs` hash routes correctly
+- Installs tab "Unique Clones" shows organic unique clones (CI excluded)
+- Overview toggles default to Views + Unique Views + Unique Clones (raw off, surfacing meaningful signal)
+- Participation labels use "Maintainer" vs "Community" (org-owned repo fix)
+- Monthly archive expanded with organic clones, unique counts, and CI checkout fields
+- Archive version bumped to 0.8.3
+- README badge links to `#installs` anchor for direct tab navigation
+- `docs/stats/README.md` rewritten with current feature list
+
+### Fixed
+- Daily history date misattribution — was using wall-clock (3am UTC), now uses API timestamps
+- Trailing projection not triggering for `null` values (only handled `0`)
+- Conditional guards on Views and Overview tabs blocking projection when only leading gaps existed
+- Overview Total Installs area dataset missing segment config entirely
+- Missing `uniqueClones`/`uniqueViews` handled as null gaps instead of false zeros
+- Triple-encoded middot (`Ã‚·`) in Popular Pages — fixed at workflow write time and dashboard display
+- Participation week dates aligned to Sunday UTC boundaries (was causing 3-day URL misalignment)
+
 ## [0.8.2] - 2026-02-24
 
 ### Added
