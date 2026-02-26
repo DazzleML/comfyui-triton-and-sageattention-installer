@@ -35,6 +35,7 @@ Full port of the mature stats system (NCSI v0.7.9–v0.7.11) to the triton workf
 - `backfill_ciruns.py` — Derive ciRuns from existing `byWorkflow.checkoutsPerRun` data
 - `backfill_organic_unique.py` — Compute organicUniqueClones with cumulative total safety guards
 - `fix_expired_uniques.py` — Remove misleading `uniqueClones: 0` from expired API window entries
+- `fix_overwritten_stars.py` — Reconstruct historical star counts via Stargazers API
 - `verify_stats_migration.py` — Validate gist state after migration
 
 ### Changed
@@ -58,6 +59,10 @@ Full port of the mature stats system (NCSI v0.7.9–v0.7.11) to the triton workf
 - Missing `uniqueClones`/`uniqueViews` handled as null gaps instead of false zeros
 - Triple-encoded middot (`Ã‚·`) in Popular Pages — fixed at workflow write time and dashboard display
 - Participation week dates aligned to Sunday UTC boundaries (was causing 3-day URL misalignment)
+- Expired API unique data (reported as 0) no longer creates false zeros — only positive values written
+- `organicUniqueClones` no longer computed for entries missing `uniqueClones` (was producing false zeros)
+- Stars/forks/openIssues no longer overwritten on historical entries — scoped to today's entry only
+- Badge recency suffix `(+N 24h)` now uses yesterday's complete data instead of last 2 API dates (~48h)
 
 ## [0.8.2] - 2026-02-24
 

@@ -169,15 +169,29 @@ jobs:
               entry.capturedAt = capturedAt;
               if (clonesByDate[dateStr] !== undefined) {
                 entry.clones = Math.max(entry.clones || 0, clonesByDate[dateStr]);
-                entry.uniqueClones = Math.max(entry.uniqueClones || 0, uniqueClonesByDate[dateStr] || 0);
+                // Only write uniqueClones when API reports a positive value.
+                // API returns 0 for expired unique data — don't overwrite
+                // real data with false zeros or create zeros from nothing.
+                const apiUniqueClones = uniqueClonesByDate[dateStr] || 0;
+                if (apiUniqueClones > 0) {
+                  entry.uniqueClones = Math.max(entry.uniqueClones || 0, apiUniqueClones);
+                }
               }
               if (viewsByDate[dateStr] !== undefined) {
                 entry.views = Math.max(entry.views || 0, viewsByDate[dateStr]);
-                entry.uniqueViews = Math.max(entry.uniqueViews || 0, uniqueViewsByDate[dateStr] || 0);
+                const apiUniqueViews = uniqueViewsByDate[dateStr] || 0;
+                if (apiUniqueViews > 0) {
+                  entry.uniqueViews = Math.max(entry.uniqueViews || 0, apiUniqueViews);
+                }
               }
-              entry.stars = state.stars || 0;
-              entry.forks = state.forks || 0;
-              entry.openIssues = state.openIssues || 0;
+              // Only set stars/forks/openIssues for today — these are
+              // point-in-time snapshots, not historical values. Writing
+              // today's count onto past entries overwrites their real values.
+              if (dateStr === todayStr) {
+                entry.stars = state.stars || 0;
+                entry.forks = state.forks || 0;
+                entry.openIssues = state.openIssues || 0;
+              }
             }
 
             // Always ensure today's entry exists to prove the script ran.
@@ -314,8 +328,10 @@ jobs:
 
             // Compute organicUniqueClones for all daily entries
             // Formula: organicUnique = unique - MIN(round(unique * ciRate), ciRuns)
+            // Skip entries without uniqueClones — don't create false zeros
             for (const entry of state.dailyHistory) {
-              const rawUnique = entry.uniqueClones || 0;
+              if (entry.uniqueClones == null) continue;
+              const rawUnique = entry.uniqueClones;
               const ciRate = (entry.clones || 0) > 0 ? entry.ciCheckouts / entry.clones : 0;
               const ciUniqueByPct = Math.round(rawUnique * ciRate);
               const ciUniqueCeiling = entry.ciRuns || 0;
@@ -335,15 +351,18 @@ jobs:
             );
             console.log(`Organic unique clones: today=${todayEntry.organicUniqueClones}, total=${state.totalOrganicUniqueClones} (raw ${state.totalUniqueClones} - CI ${state.totalCiUniqueClones})`);
 
-            // 8. Compute cascading recency suffix (~24h window, organic only)
-            // Use last two API clone entries minus CI checkouts for badge
-            const cloneDates = Object.keys(clonesByDate).sort();
+            // 8. Compute cascading recency suffix (organic only)
+            // Use yesterday's complete 24h clone data for the "24h" badge.
+            // Yesterday is always a full day regardless of when the workflow
+            // runs (3am cron vs commit trigger), so the label is accurate.
+            const yesterday = new Date();
+            yesterday.setUTCDate(yesterday.getUTCDate() - 1);
+            const yesterdayStr = yesterday.toISOString().slice(0, 10);
             let last24hClones = 0;
-            for (let i = Math.max(0, cloneDates.length - 2); i < cloneDates.length; i++) {
-              const d = cloneDates[i];
-              const raw = clonesByDate[d];
-              const ci = (state.ciCheckouts[d] && state.ciCheckouts[d].total) || 0;
-              last24hClones += Math.max(0, raw - ci);
+            if (clonesByDate[yesterdayStr] !== undefined) {
+              const raw = clonesByDate[yesterdayStr];
+              const ci = (state.ciCheckouts[yesterdayStr] && state.ciCheckouts[yesterdayStr].total) || 0;
+              last24hClones = Math.max(0, raw - ci);
             }
             const last24h = last24hClones + todayDownloads;
 
