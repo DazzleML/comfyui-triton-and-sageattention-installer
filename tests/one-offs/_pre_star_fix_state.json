@@ -1,0 +1,569 @@
+{
+  "totalClones": 10433,
+  "baselineClones": 10000,
+  "baselineNote": "Estimated pre-tracking total (project active since Jul 2025)",
+  "lastSeenDates": [
+    "2026-02-12T00:00:00Z",
+    "2026-02-13T00:00:00Z",
+    "2026-02-14T00:00:00Z",
+    "2026-02-15T00:00:00Z",
+    "2026-02-16T00:00:00Z",
+    "2026-02-17T00:00:00Z",
+    "2026-02-18T00:00:00Z",
+    "2026-02-19T00:00:00Z",
+    "2026-02-20T00:00:00Z",
+    "2026-02-21T00:00:00Z",
+    "2026-02-22T00:00:00Z",
+    "2026-02-23T00:00:00Z",
+    "2026-02-24T00:00:00Z",
+    "2026-02-25T00:00:00Z"
+  ],
+  "totalDownloads": 0,
+  "totalViews": 2747,
+  "baselineViews": 0,
+  "lastSeenViewDates": [
+    "2026-02-12T00:00:00Z",
+    "2026-02-13T00:00:00Z",
+    "2026-02-14T00:00:00Z",
+    "2026-02-15T00:00:00Z",
+    "2026-02-16T00:00:00Z",
+    "2026-02-17T00:00:00Z",
+    "2026-02-18T00:00:00Z",
+    "2026-02-19T00:00:00Z",
+    "2026-02-20T00:00:00Z",
+    "2026-02-21T00:00:00Z",
+    "2026-02-22T00:00:00Z",
+    "2026-02-23T00:00:00Z",
+    "2026-02-24T00:00:00Z",
+    "2026-02-25T00:00:00Z"
+  ],
+  "stars": 80,
+  "forks": 3,
+  "openIssues": 6,
+  "referrers": [
+    {
+      "source": "Google",
+      "count": 946,
+      "uniques": 470
+    },
+    {
+      "source": "Bing",
+      "count": 139,
+      "uniques": 68
+    },
+    {
+      "source": "DuckDuckGo",
+      "count": 105,
+      "uniques": 50
+    },
+    {
+      "source": "github.com",
+      "count": 93,
+      "uniques": 56
+    },
+    {
+      "source": "yandex.ru",
+      "count": 80,
+      "uniques": 49
+    },
+    {
+      "source": "search.brave.com",
+      "count": 71,
+      "uniques": 36
+    },
+    {
+      "source": "civitai.com",
+      "count": 41,
+      "uniques": 12
+    },
+    {
+      "source": "chatgpt.com",
+      "count": 31,
+      "uniques": 16
+    },
+    {
+      "source": "Yahoo",
+      "count": 17,
+      "uniques": 10
+    },
+    {
+      "source": "reddit.com",
+      "count": 10,
+      "uniques": 7
+    }
+  ],
+  "ciCheckouts": {
+    "2026-02-10": {
+      "total": 0,
+      "runs": 0
+    },
+    "2026-02-11": {
+      "total": 0,
+      "runs": 0
+    },
+    "2026-02-12": {
+      "total": 0,
+      "runs": 0
+    },
+    "2026-02-13": {
+      "total": 0,
+      "runs": 0
+    },
+    "2026-02-14": {
+      "total": 0,
+      "runs": 0
+    },
+    "2026-02-15": {
+      "total": 0,
+      "runs": 0
+    },
+    "2026-02-16": {
+      "total": 0,
+      "runs": 0
+    },
+    "2026-02-17": {
+      "total": 0,
+      "runs": 0
+    },
+    "2026-02-18": {
+      "total": 0,
+      "runs": 0
+    },
+    "2026-02-19": {
+      "total": 0,
+      "runs": 0
+    },
+    "2026-02-20": {
+      "total": 0,
+      "runs": 0
+    },
+    "2026-02-21": {
+      "total": 0,
+      "runs": 0
+    },
+    "2026-02-22": {
+      "total": 0,
+      "runs": 0
+    },
+    "2026-02-23": {
+      "total": 0,
+      "runs": 0
+    },
+    "2026-02-24": {
+      "total": 44,
+      "byWorkflow": {
+        "CI": {
+          "runs": 4,
+          "checkoutsPerRun": [
+            10,
+            10,
+            10,
+            10
+          ]
+        },
+        "pages build and deployment": {
+          "runs": 4,
+          "checkoutsPerRun": [
+            1,
+            1,
+            1,
+            1
+          ]
+        },
+        "Track Downloads & Clones": {
+          "runs": 4,
+          "checkoutsPerRun": [
+            0,
+            0,
+            0,
+            0
+          ]
+        }
+      },
+      "runs": 8
+    },
+    "2026-02-26": {
+      "total": 22,
+      "runs": 4,
+      "byWorkflow": {
+        "Track Downloads & Clones": {
+          "runs": 3,
+          "checkoutsPerRun": [
+            0,
+            0,
+            0
+          ]
+        },
+        "CI": {
+          "runs": 2,
+          "checkoutsPerRun": [
+            10,
+            10
+          ]
+        },
+        "pages build and deployment": {
+          "runs": 2,
+          "checkoutsPerRun": [
+            1,
+            1
+          ]
+        }
+      }
+    }
+  },
+  "dailyHistory": [
+    {
+      "date": "2026-02-10T00:00:00Z",
+      "clones": 26,
+      "ciCheckouts": 0,
+      "organicClones": 26,
+      "downloads": 0,
+      "views": 193,
+      "total": 26,
+      "stars": 77,
+      "forks": 3,
+      "openIssues": 6,
+      "capturedAt": "2026-02-10T03:00:00Z",
+      "ciRuns": 0,
+      "organicUniqueClones": 0
+    },
+    {
+      "date": "2026-02-11T00:00:00Z",
+      "clones": 24,
+      "ciCheckouts": 0,
+      "organicClones": 24,
+      "downloads": 0,
+      "views": 221,
+      "total": 24,
+      "stars": 77,
+      "forks": 3,
+      "openIssues": 6,
+      "uniqueClones": 18,
+      "uniqueViews": 110,
+      "capturedAt": "2026-02-11T03:00:00Z",
+      "ciRuns": 0,
+      "organicUniqueClones": 18
+    },
+    {
+      "date": "2026-02-12T00:00:00Z",
+      "clones": 23,
+      "ciCheckouts": 0,
+      "organicClones": 23,
+      "downloads": 0,
+      "views": 141,
+      "total": 23,
+      "stars": 80,
+      "forks": 3,
+      "openIssues": 6,
+      "uniqueClones": 16,
+      "uniqueViews": 86,
+      "capturedAt": "2026-02-26T09:12:55.471Z",
+      "ciRuns": 0,
+      "organicUniqueClones": 16
+    },
+    {
+      "date": "2026-02-13T00:00:00Z",
+      "clones": 26,
+      "ciCheckouts": 0,
+      "organicClones": 26,
+      "downloads": 0,
+      "views": 111,
+      "total": 26,
+      "stars": 80,
+      "forks": 3,
+      "openIssues": 6,
+      "uniqueClones": 23,
+      "uniqueViews": 72,
+      "capturedAt": "2026-02-26T09:12:55.471Z",
+      "ciRuns": 0,
+      "organicUniqueClones": 23
+    },
+    {
+      "date": "2026-02-14T00:00:00Z",
+      "clones": 34,
+      "ciCheckouts": 0,
+      "organicClones": 34,
+      "downloads": 0,
+      "views": 191,
+      "total": 34,
+      "stars": 80,
+      "forks": 3,
+      "openIssues": 6,
+      "uniqueClones": 26,
+      "uniqueViews": 97,
+      "capturedAt": "2026-02-26T09:12:55.471Z",
+      "ciRuns": 0,
+      "organicUniqueClones": 26
+    },
+    {
+      "date": "2026-02-15T00:00:00Z",
+      "clones": 15,
+      "ciCheckouts": 0,
+      "organicClones": 15,
+      "downloads": 0,
+      "views": 117,
+      "total": 15,
+      "stars": 80,
+      "forks": 3,
+      "openIssues": 6,
+      "uniqueClones": 10,
+      "uniqueViews": 62,
+      "capturedAt": "2026-02-26T09:12:55.471Z",
+      "ciRuns": 0,
+      "organicUniqueClones": 10
+    },
+    {
+      "date": "2026-02-16T00:00:00Z",
+      "clones": 22,
+      "ciCheckouts": 0,
+      "organicClones": 22,
+      "downloads": 0,
+      "views": 113,
+      "total": 22,
+      "stars": 80,
+      "forks": 3,
+      "openIssues": 6,
+      "uniqueClones": 11,
+      "uniqueViews": 65,
+      "capturedAt": "2026-02-26T09:12:55.471Z",
+      "ciRuns": 0,
+      "organicUniqueClones": 11
+    },
+    {
+      "date": "2026-02-17T00:00:00Z",
+      "clones": 37,
+      "ciCheckouts": 0,
+      "organicClones": 37,
+      "downloads": 0,
+      "views": 163,
+      "total": 37,
+      "stars": 80,
+      "forks": 3,
+      "openIssues": 6,
+      "uniqueClones": 25,
+      "uniqueViews": 97,
+      "capturedAt": "2026-02-26T09:12:55.471Z",
+      "ciRuns": 0,
+      "organicUniqueClones": 25
+    },
+    {
+      "date": "2026-02-18T00:00:00Z",
+      "clones": 16,
+      "ciCheckouts": 0,
+      "organicClones": 16,
+      "downloads": 0,
+      "views": 120,
+      "total": 16,
+      "stars": 80,
+      "forks": 3,
+      "openIssues": 6,
+      "uniqueClones": 12,
+      "uniqueViews": 71,
+      "capturedAt": "2026-02-26T09:12:55.471Z",
+      "ciRuns": 0,
+      "organicUniqueClones": 12
+    },
+    {
+      "date": "2026-02-19T00:00:00Z",
+      "clones": 12,
+      "ciCheckouts": 0,
+      "organicClones": 12,
+      "downloads": 0,
+      "views": 134,
+      "total": 12,
+      "stars": 80,
+      "forks": 3,
+      "openIssues": 6,
+      "uniqueClones": 10,
+      "uniqueViews": 69,
+      "capturedAt": "2026-02-26T09:12:55.471Z",
+      "ciRuns": 0,
+      "organicUniqueClones": 10
+    },
+    {
+      "date": "2026-02-20T00:00:00Z",
+      "clones": 13,
+      "ciCheckouts": 0,
+      "organicClones": 13,
+      "downloads": 0,
+      "views": 147,
+      "total": 13,
+      "stars": 80,
+      "forks": 3,
+      "openIssues": 6,
+      "uniqueClones": 13,
+      "uniqueViews": 79,
+      "capturedAt": "2026-02-26T09:12:55.471Z",
+      "ciRuns": 0,
+      "organicUniqueClones": 13
+    },
+    {
+      "date": "2026-02-21T00:00:00Z",
+      "clones": 14,
+      "ciCheckouts": 0,
+      "organicClones": 14,
+      "downloads": 0,
+      "views": 168,
+      "total": 14,
+      "stars": 80,
+      "forks": 3,
+      "openIssues": 6,
+      "uniqueClones": 12,
+      "uniqueViews": 86,
+      "capturedAt": "2026-02-26T09:12:55.471Z",
+      "ciRuns": 0,
+      "organicUniqueClones": 12
+    },
+    {
+      "date": "2026-02-22T00:00:00Z",
+      "clones": 29,
+      "ciCheckouts": 0,
+      "organicClones": 29,
+      "downloads": 0,
+      "views": 281,
+      "total": 29,
+      "stars": 80,
+      "forks": 3,
+      "openIssues": 6,
+      "uniqueClones": 24,
+      "uniqueViews": 111,
+      "capturedAt": "2026-02-26T09:12:55.471Z",
+      "ciRuns": 0,
+      "organicUniqueClones": 24
+    },
+    {
+      "date": "2026-02-23T00:00:00Z",
+      "clones": 26,
+      "ciCheckouts": 0,
+      "organicClones": 26,
+      "downloads": 0,
+      "views": 219,
+      "total": 26,
+      "stars": 80,
+      "forks": 3,
+      "openIssues": 6,
+      "uniqueClones": 22,
+      "uniqueViews": 105,
+      "capturedAt": "2026-02-26T09:12:55.471Z",
+      "ciRuns": 0,
+      "organicUniqueClones": 22
+    },
+    {
+      "date": "2026-02-24T00:00:00Z",
+      "clones": 94,
+      "ciCheckouts": 44,
+      "organicClones": 50,
+      "downloads": 0,
+      "views": 226,
+      "total": 94,
+      "stars": 80,
+      "forks": 3,
+      "openIssues": 6,
+      "uniqueClones": 37,
+      "uniqueViews": 94,
+      "capturedAt": "2026-02-26T09:12:55.471Z",
+      "ciRuns": 8,
+      "organicUniqueClones": 29
+    },
+    {
+      "date": "2026-02-25T00:00:00Z",
+      "capturedAt": "2026-02-26T09:12:55.471Z",
+      "clones": 22,
+      "uniqueClones": 18,
+      "views": 202,
+      "uniqueViews": 104,
+      "stars": 80,
+      "forks": 3,
+      "openIssues": 6,
+      "total": 22,
+      "ciCheckouts": 0,
+      "ciRuns": 0,
+      "organicClones": 22,
+      "organicUniqueClones": 18
+    },
+    {
+      "date": "2026-02-26T00:00:00Z",
+      "clones": 22,
+      "downloads": 0,
+      "views": 202,
+      "total": 22,
+      "stars": 80,
+      "forks": 3,
+      "openIssues": 6,
+      "organicUniqueClones": 0,
+      "ciCheckouts": 22,
+      "ciRuns": 4,
+      "organicClones": 0,
+      "capturedAt": "2026-02-26T09:12:55.471Z"
+    }
+  ],
+  "previousTotalDownloads": 0,
+  "totalCiCheckouts": 66,
+  "totalUniqueClones": 259,
+  "totalUniqueViews": 1204,
+  "popularPaths": [
+    {
+      "path": "/DazzleML/comfyui-triton-and-sageattention-installer",
+      "title": "GitHub - DazzleML/comfyui-triton-and-sageattention-installer: Cross-platform ...",
+      "count": 1352,
+      "uniques": 887
+    },
+    {
+      "path": "/DazzleML/comfyui-triton-and-sageattention-installer/releases/tag/v0.8.0",
+      "title": "Release v0.8.0 - ComfyUI Installation Discovery \u00c2\u00b7 DazzleML/comfyui-triton-and...",
+      "count": 183,
+      "uniques": 123
+    },
+    {
+      "path": "/DazzleML/comfyui-triton-and-sageattention-installer/blob/main/comfyui_triton_sageattention.py",
+      "title": "comfyui-triton-and-sageattention-installer/comfyui_triton_sageattention.py at...",
+      "count": 178,
+      "uniques": 120
+    },
+    {
+      "path": "/DazzleML/comfyui-triton-and-sageattention-installer/blob/main/README.md",
+      "title": "comfyui-triton-and-sageattention-installer/README.md at main \u00c2\u00b7 DazzleML/comfy...",
+      "count": 117,
+      "uniques": 96
+    },
+    {
+      "path": "/DazzleML/comfyui-triton-and-sageattention-installer/releases",
+      "title": "Releases \u00c2\u00b7 DazzleML/comfyui-triton-and-sageattention-installer",
+      "count": 108,
+      "uniques": 86
+    },
+    {
+      "path": "/DazzleML/comfyui-triton-and-sageattention-installer/issues",
+      "title": "GitHub \u00c2\u00b7 Where software is built",
+      "count": 49,
+      "uniques": 35
+    },
+    {
+      "path": "/DazzleML/comfyui-triton-and-sageattention-installer/tree/main",
+      "title": "GitHub - DazzleML/comfyui-triton-and-sageattention-installer: Cross-platform ...",
+      "count": 47,
+      "uniques": 38
+    },
+    {
+      "path": "/DazzleML/comfyui-triton-and-sageattention-installer/blob/main/docs/supported_wheels.md",
+      "title": "comfyui-triton-and-sageattention-installer/docs/supported_wheels.md at main \u00c2\u00b7...",
+      "count": 35,
+      "uniques": 26
+    },
+    {
+      "path": "/DazzleML/comfyui-triton-and-sageattention-installer/blob/main/docs/ai_toolkit_rtx5090_setup.md",
+      "title": "comfyui-triton-and-sageattention-installer/docs/ai_toolkit_rtx5090_setup.md a...",
+      "count": 34,
+      "uniques": 22
+    },
+    {
+      "path": "/DazzleML/comfyui-triton-and-sageattention-installer/blob/main/requirements.txt",
+      "title": "comfyui-triton-and-sageattention-installer/requirements.txt at main \u00c2\u00b7 DazzleM...",
+      "count": 23,
+      "uniques": 23
+    }
+  ],
+  "totalCiUniqueClones": 8,
+  "totalOrganicUniqueClones": 251,
+  "_previousCiUniqueToday": 0
+}

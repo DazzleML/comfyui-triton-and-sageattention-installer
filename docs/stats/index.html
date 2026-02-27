@@ -991,13 +991,19 @@
                 projectedTo = firstRealIdx;
             }
 
-            // Trailing zeros: only project if the last entry is today AND its value is 0
+            // Trailing zeros: project if the last entry is today or yesterday
+            // and its value is 0/null. "Yesterday" covers the timezone gap:
+            // US-timezone users see UTC date roll to tomorrow before the 3am
+            // UTC workflow run creates today's entry, leaving the last entry
+            // as "yesterday" with no projection. Allow 1-day slack.
             var lastIdx = result.length - 1;
-            var today = new Date().toISOString().slice(0, 10);
+            var now = new Date();
+            var today = now.toISOString().slice(0, 10);
+            var yesterday = new Date(now - 86400000).toISOString().slice(0, 10);
             var lastDate = (dates[lastIdx] || '').slice(0, 10);
             var projectedFrom = result.length;
 
-            if ((result[lastIdx] === 0 || result[lastIdx] === null) && lastDate === today) {
+            if ((result[lastIdx] === 0 || result[lastIdx] === null) && (lastDate === today || lastDate === yesterday)) {
                 result[lastIdx] = result[lastIdx - 1];
                 if (result[lastIdx] !== 0 && result[lastIdx] !== null) {
                     projectedFrom = lastIdx;

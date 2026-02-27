@@ -5,6 +5,23 @@ All notable changes to the ComfyUI Triton and SageAttention installer will be do
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.4] - 2026-02-27
+
+Schema versioning, delta-based dedup, and totals repair for the traffic collection workflow. Ports the mature data-quality fixes from NCSI v0.7.12 to eliminate silent data loss from boolean set-based dedup and phantom CI subtraction.
+
+### Changed (Workflow)
+- **Clone/view dedup**: boolean sets (`lastSeenDates`) → delta count maps (`lastSeenCloneCounts`, `lastSeenViewCounts`) — prevents silent data loss when zero-count dates later gain activity
+- **Organic clones**: global subtraction (`totalClones - totalCiCheckouts`) → per-day `totalOrganicClones` accumulation — eliminates phantom CI on zero-clone days reducing organic below zero
+- Archive and badge organic sourced from `totalOrganicClones` instead of global subtraction
+
+### Added (Workflow)
+- **Schema versioning** — `schemaVersion` field with forward-only migrations: v1→v2 (delta maps), v2→v3 (`totalOrganicClones` seeding)
+- **Push trigger** on `main` with 60-minute freshness gate (skips if last collection was recent)
+- **Concurrency group** (`traffic-collection`, cancel-in-progress) to prevent overlapping runs
+- **`repoCreatedAt`** / **`trackingSince`** metadata fields for distinguishing "no data" from "not collected"
+- **Pre-repo entry filtering** — removes Traffic API 14-day backfill entries that predate the repository
+- **Totals sanity repair** — raises under-counted totals to match dailyHistory sums (never lowers), fixing first-run seeding bugs
+
 ## [0.8.3] - 2026-02-26
 
 Full port of the mature stats system (NCSI v0.7.9–v0.7.11) to the triton workflow and dashboard. Adds CI clone detection, organic clone separation, unique tracking, Dev tab with GitHub Statistics API, and data quality improvements.
