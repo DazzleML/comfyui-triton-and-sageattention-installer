@@ -2,14 +2,22 @@
 """
 Ostris AI Toolkit RTX 5090 Compatibility Installer
 
-This installer helps setup the Ostris AI Toolkit for RTX 5090 GPUs by:
-1. Installing PyTorch with sm_120 support (CUDA 12.8 nightly)
-2. Configuring the environment for Blackwell architecture
-3. Disabling incompatible features (quantization, flash attention) when necessary
-4. Providing WSL2 setup guidance for Windows users
-5. Creating optimized configuration files for training
+Configures the Ostris AI Toolkit for RTX 5090 (Blackwell) GPUs. Installs
+PyTorch with sm_120 support via CUDA 12.8 nightly builds, disables
+incompatible features (quantization, flash attention) when necessary,
+and provides WSL2 setup guidance for Windows users.
 
-Based on the successful ComfyUI Triton installer pattern.
+Usage:
+    python ai_toolkit_rtx5090_installer.py --install       # Install/configure
+    python ai_toolkit_rtx5090_installer.py --dryrun        # Preview changes
+    python ai_toolkit_rtx5090_installer.py --show-installed # Show current state
+
+Copyright (c) 2025-2026 Dustin Darcy
+https://github.com/DazzleML/comfyui-triton-and-sageattention-installer
+
+Licensed under the MIT License. See LICENSE file for details.
+"The above copyright notice and this permission notice shall be included
+in all copies or substantial portions of the Software."
 """
 
 import argparse

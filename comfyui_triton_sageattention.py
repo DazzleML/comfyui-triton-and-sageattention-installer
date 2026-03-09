@@ -1,14 +1,27 @@
 #!/usr/bin/env python3
 """
-Cross-Platform ComfyUI with Triton and SageAttention Installer
+ComfyUI Triton and SageAttention Installer
 
-A Python-based installer that replicates the functionality of the Windows batch scripts
-while providing cross-platform support for Linux, macOS, and Windows.
+Cross-platform installer for Triton and SageAttention on ComfyUI. Automates
+GPU-accelerated inference setup with dependency management, pre-built wheel
+selection, environment backup/restore, and ComfyUI installation discovery.
 
-Includes all functionality from:
-- (Step 1) Remove Triton Dependency Packages.bat
-- (Step 2) Install Triton Dependency Packages.bat  
-- run_nvidia_gpu.bat
+Supports Windows (primary), Linux, and macOS. Handles CUDA detection, PyTorch
+compatibility, Visual Studio Build Tools, and Python development headers.
+
+Usage:
+    python comfyui_triton_sageattention.py --install          # Install all components
+    python comfyui_triton_sageattention.py --upgrade          # Upgrade existing install
+    python comfyui_triton_sageattention.py --dryrun           # Preview changes
+    python comfyui_triton_sageattention.py --show-installed   # Show current state
+    python comfyui_triton_sageattention.py --backup create    # Backup before changes
+
+Copyright (C) 2025-2026 Dustin Darcy
+https://github.com/DazzleML/comfyui-triton-and-sageattention-installer
+
+Licensed under the MIT License. See LICENSE file for details.
+"The above copyright notice and this permission notice shall be included
+in all copies or substantial portions of the Software."
 """
 
 import argparse
