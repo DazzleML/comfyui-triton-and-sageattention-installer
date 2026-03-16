@@ -137,14 +137,19 @@ TRITON_COMPATIBILITY_MATRIX = [
     # === Incompatible - needs fix ===
     ("triton_old_torch29", "3.2.0", "2.9.1", "FIX", "Old Triton needs upgrade"),
 
+    # === Triton 3.6 / PyTorch 2.10 boundary ===
+    ("triton_36_torch210", "3.6.0", "2.10.0", "KEEP", "Triton 3.6 compatible with PyTorch 2.10"),
+    ("triton_36_torch29_incompat", "3.6.0", "2.9.1", "FIX", "Triton 3.6 requires PyTorch >= 2.10"),
+    ("triton_35_torch210_outdated", "3.5.0", "2.10.0", "FIX", "PyTorch 2.10 needs Triton >= 3.6"),
+
     # === Future Version Scenarios ===
-    ("future_triton_36_torch29", "3.6.0", "2.9.1", "KEEP", "Newer Triton, assume compatible"),
     ("future_triton_40_torch210", "4.0.0", "2.10.0", "KEEP", "Major Triton bump"),
     ("future_triton_36_torch30", "3.6.0", "3.0.0", "KEEP", "PyTorch 3.x with newer Triton"),
 
-    # === Unknown PyTorch + existing Triton ===
+    # === Unknown PyTorch + existing Triton (don't touch what we don't know about) ===
     ("triton_existing_torch_future", "3.5.3", "2.11.0", "KEEP", "Unknown torch, keep triton"),
     ("triton_existing_torch3", "3.5.3", "3.0.0", "KEEP", "PyTorch 3.x, keep existing triton"),
+    ("triton_existing_torch_future_ok", "3.6.0", "2.11.0", "KEEP", "Future torch with adequate Triton"),
 
     # === Installer should NOT downgrade working Triton ===
     ("triton_newer_than_expected", "3.7.0", "2.9.1", "KEEP", "User has newer Triton"),

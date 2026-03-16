@@ -43,7 +43,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 # Version information
-__version__ = "0.8.5"
+__version__ = "0.8.6"
 
 
 def parse_sage_version(version_str: str) -> Tuple[Optional[int], Optional[str]]:
@@ -2323,6 +2323,7 @@ class ComfyUIInstaller:
         """Install or fix Triton with version constraint based on PyTorch compatibility.
 
         Triton/PyTorch version compatibility (triton-windows):
+        - Triton 3.6.x requires PyTorch >= 2.10
         - Triton 3.5.x requires PyTorch >= 2.9
         - Triton 3.4.x requires PyTorch >= 2.8
         - Triton 3.3.x requires PyTorch >= 2.7
@@ -2333,6 +2334,13 @@ class ComfyUIInstaller:
 
         See: https://github.com/woct0rdho/triton-windows/issues/158
         """
+        # Consult the plan (single source of truth for install decisions)
+        if hasattr(self, '_current_plan') and self._current_plan:
+            action = self._current_plan.get_action("Triton")
+            if action and action.action == "KEEP":
+                print(f"Triton {action.current_version} is compatible with PyTorch - skipping")
+                return
+
         # Determine base package name
         if platform.system() == "Windows":
             base_package = "triton-windows"
@@ -2493,6 +2501,7 @@ class ComfyUIInstaller:
         """Get compatible triton-windows version constraint for PyTorch version.
 
         Based on https://github.com/woct0rdho/triton-windows compatibility:
+        - Triton 3.6.x requires PyTorch >= 2.10
         - Triton 3.5.x requires PyTorch >= 2.9
         - Triton 3.4.x requires PyTorch >= 2.8
         - Triton 3.3.x requires PyTorch >= 2.7
@@ -2510,8 +2519,10 @@ class ComfyUIInstaller:
             # Handle "+cu128" suffix in minor version
             minor = int(parts[1].split("+")[0])
 
-            if (major, minor) >= (2, 9):
-                return ">=3.5,<4"
+            if (major, minor) >= (2, 10):
+                return ">=3.6,<4"
+            elif (major, minor) >= (2, 9):
+                return ">=3.5,<3.6"
             elif (major, minor) >= (2, 8):
                 return ">=3.4,<3.5"
             elif (major, minor) >= (2, 7):
@@ -2550,18 +2561,21 @@ class ComfyUIInstaller:
 
             # === Forward check: Is PyTorch new enough for this Triton? ===
             # Triton X.Y requires PyTorch >= Z
-            if (triton_major, triton_minor) >= (3, 5):
-                required_torch = (2, 9)
-                required_torch_str = "2.9"
-            elif (triton_major, triton_minor) >= (3, 4):
-                required_torch = (2, 8)
-                required_torch_str = "2.8"
-            elif (triton_major, triton_minor) >= (3, 3):
-                required_torch = (2, 7)
-                required_torch_str = "2.7"
-            elif (triton_major, triton_minor) >= (3, 2):
-                required_torch = (2, 6)
-                required_torch_str = "2.6"
+            # Use exact ranges — unknown future versions assume compatible
+            triton_requires_torch = {
+                (3, 6): ((2, 10), "2.10"),
+                (3, 5): ((2, 9), "2.9"),
+                (3, 4): ((2, 8), "2.8"),
+                (3, 3): ((2, 7), "2.7"),
+                (3, 2): ((2, 6), "2.6"),
+            }
+            triton_key = (triton_major, triton_minor)
+            if triton_key in triton_requires_torch:
+                required_torch, required_torch_str = triton_requires_torch[triton_key]
+            elif triton_key > (3, 6):
+                # Future Triton — assume compatible (don't block user's install)
+                required_torch = (2, 0)
+                required_torch_str = "2.0"
             else:
                 # Very old Triton, assume compatible
                 required_torch = (2, 0)
@@ -2572,18 +2586,22 @@ class ComfyUIInstaller:
 
             # === Reverse check: Is Triton new enough for this PyTorch? ===
             # PyTorch X.Y expects Triton >= Z for optimal compatibility
-            if (torch_major, torch_minor) >= (2, 9):
-                recommended_triton = (3, 5)
-                recommended_triton_str = "3.5"
-            elif (torch_major, torch_minor) >= (2, 8):
-                recommended_triton = (3, 4)
-                recommended_triton_str = "3.4"
-            elif (torch_major, torch_minor) >= (2, 7):
-                recommended_triton = (3, 3)
-                recommended_triton_str = "3.3"
-            elif (torch_major, torch_minor) >= (2, 6):
-                recommended_triton = (3, 2)
-                recommended_triton_str = "3.2"
+            # For known versions, enforce the mapping. For unknown future
+            # PyTorch, use the highest known requirement as a floor.
+            torch_recommends_triton = {
+                (2, 10): ((3, 6), "3.6"),
+                (2, 9): ((3, 5), "3.5"),
+                (2, 8): ((3, 4), "3.4"),
+                (2, 7): ((3, 3), "3.3"),
+                (2, 6): ((3, 2), "3.2"),
+            }
+            torch_key = (torch_major, torch_minor)
+            if torch_key in torch_recommends_triton:
+                recommended_triton, recommended_triton_str = torch_recommends_triton[torch_key]
+            elif torch_key > (2, 10):
+                # Future PyTorch — assume compatible (don't flag user's working install)
+                recommended_triton = (3, 0)
+                recommended_triton_str = "3.0"
             else:
                 # Older PyTorch, any Triton should work
                 recommended_triton = (3, 0)
@@ -3164,15 +3182,29 @@ class ComfyUIInstaller:
         # Compatible - check for upgrades if requested
         if self.upgrade:
             has_update, new_version = self._check_package_update_available(triton_package)
-            if has_update:
-                return ComponentAction(
-                    component="Triton",
-                    action="UPGRADE",
-                    current_version=state.triton_version,
-                    target_version=new_version or "newer",
-                    reason="Update available",
-                    details=f"constraint: {constraint}" if constraint else None
-                )
+            if has_update and new_version:
+                # Verify the proposed upgrade satisfies our PyTorch-Triton constraint
+                # pip reports latest available, but we must not upgrade to an
+                # incompatible version (e.g., Triton 3.6 with PyTorch 2.7)
+                upgrade_ok = True
+                if constraint and new_version:
+                    from packaging.version import Version
+                    from packaging.specifiers import SpecifierSet
+                    try:
+                        if not Version(new_version) in SpecifierSet(constraint):
+                            upgrade_ok = False
+                    except Exception:
+                        pass  # If we can't parse, don't block the upgrade
+
+                if upgrade_ok:
+                    return ComponentAction(
+                        component="Triton",
+                        action="UPGRADE",
+                        current_version=state.triton_version,
+                        target_version=new_version,
+                        reason="Update available",
+                        details=f"constraint: {constraint}" if constraint else None
+                    )
 
         return ComponentAction(
             component="Triton",
@@ -3877,6 +3909,13 @@ class ComfyUIInstaller:
             print("Installing SageAttention")
         print("=" * 60)
         print(f"  Requested: --sage-version {self.sage_version_raw}")
+
+        # Consult the plan (single source of truth for install decisions)
+        if self.upgrade and hasattr(self, '_current_plan') and self._current_plan:
+            sa_action = self._current_plan.get_action("SageAttention")
+            if sa_action and sa_action.action == "KEEP":
+                print(f"  Already at target version ({sa_action.current_version})")
+                return
 
         # Handle upgrade mode: detect current version and remove before reinstall
         if self.upgrade:

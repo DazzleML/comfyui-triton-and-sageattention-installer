@@ -5,6 +5,19 @@ All notable changes to the ComfyUI Triton and SageAttention installer will be do
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.6] - 2026-03-16
+
+Fix dryrun/actual divergence in Triton and SageAttention upgrade paths. Execution methods now consult the InstallPlan as single source of truth, matching the pattern established for PyTorch in Issue #18.
+
+### Fixed
+- **Triton upgrade dryrun mismatch**: `--upgrade --dryrun` proposed upgrading Triton to a version incompatible with the installed PyTorch (e.g., Triton 3.6 with PyTorch 2.7, which requires Triton 3.3.x). Plan now filters pip's proposed version through the PyTorch-Triton constraint.
+- **SageAttention unnecessary reinstall**: `--upgrade` unconditionally uninstalled and reinstalled SA even when already at target version. Execution now consults the plan and skips when plan says KEEP.
+- **Triton execution ignoring plan**: `install_triton()` re-derived its own compatibility decision instead of consulting the plan. Now checks plan first (same pattern as `install_pytorch()`).
+- **Triton constraint for PyTorch 2.10**: `_get_triton_version_constraint()` now returns `>=3.6,<4` for PyTorch >= 2.10 (was lumped into `>=3.5,<4` with PyTorch 2.9)
+
+### Design
+- `2026-03-16__15-44-44__full-postmortem_dryrun-actual-divergence-triton-sa-upgrade.md`
+
 ## [0.8.5] - 2026-03-16
 
 Add SageAttention 2.x wheel support for PyTorch 2.10 + CUDA 13.0/12.8 environments, enabling SA 2.x on Blackwell GPUs (RTX 50-series). Uses the upstream "andhigher" forward-compatible wheels from woct0rdho/SageAttention v2.2.0-windows.post4.

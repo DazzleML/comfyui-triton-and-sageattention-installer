@@ -23,7 +23,7 @@ Installing SageAttention on Windows has been notoriously difficult due to compil
 - **Python header management** - Automatically sets up development headers
 - **RTX 5090 ready** - Full support for Blackwell architecture with CUDA 12.8
 - **Graceful fallbacks** - Continues installation even if some components fail
-- **Detailed logging** - Comprehensive logs for troubleshooting
+- **Detailed logging** - Extensive logs for troubleshooting
 
 ## Prerequisites
 
