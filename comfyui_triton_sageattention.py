@@ -43,7 +43,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 # Version information
-__version__ = "0.8.4"
+__version__ = "0.8.5"
 
 
 def parse_sage_version(version_str: str) -> Tuple[Optional[int], Optional[str]]:
@@ -2682,6 +2682,13 @@ class ComfyUIInstaller:
             # === SA 2.2.0.post4 (ABI3) - EXPERIMENTAL (torch.compile support) ===
             ("2.2.0.post4", "130", "2.9", None, "v2.2.0-windows.post4", True, True, "2.9.0andhigher"),
             ("2.2.0.post4", "128", "2.9", None, "v2.2.0-windows.post4", True, True, "2.9.0andhigher"),
+
+            # === SA 2.2.0.post4 (ABI3) - PyTorch 2.10+ ("andhigher" forward-compat wheels) ===
+            # For torch 2.10+, post4 is the only available wheel (no post3 exists).
+            # Marked non-experimental since there is no stable alternative for these envs.
+            # Upstream confirmed working: woct0rdho/SageAttention#83, #86
+            ("2.2.0.post4", "130", "2.10", None, "v2.2.0-windows.post4", True, False, "2.9.0andhigher"),
+            ("2.2.0.post4", "128", "2.10", None, "v2.2.0-windows.post4", True, False, "2.9.0andhigher"),
 
             # === SA 2.1.1 (per-Python) - for --sage-version 2.1.1 requests ===
             # Non-ABI3 wheels: torch_filename_ver is same as torch_pattern (exact match)

@@ -15,14 +15,16 @@ Uses ABI3 wheels compatible with Python 3.9+.
 | 12.6 | 2.6.x | |
 | 12.4 | 2.5.x | |
 
-## SageAttention 2.2.0.post4 (Experimental)
+## SageAttention 2.2.0.post4
 
-Requires `--experimental` flag. Uses ABI3 wheels compatible with Python 3.9+.
+Uses ABI3 "andhigher" wheels compatible with Python 3.9+ and PyTorch >= 2.9. For PyTorch 2.10+, these are the primary (non-experimental) wheels. For PyTorch 2.9.x, requires `--experimental` flag (post3 is the stable default).
 
 | CUDA | PyTorch | Notes |
 |------|---------|-------|
-| 13.0 | 2.9.x | RTX 5090 / Blackwell |
-| 12.8 | 2.9.x | |
+| 13.0 | 2.10.x | RTX 50-series / Blackwell ([#29](https://github.com/DazzleML/comfyui-triton-and-sageattention-installer/issues/29)) |
+| 12.8 | 2.10.x | |
+| 13.0 | 2.9.x | Requires `--experimental` |
+| 12.8 | 2.9.x | Requires `--experimental` |
 
 ## SageAttention 2.1.1
 
@@ -77,9 +79,10 @@ The installer automatically selects a compatible Triton version based on your Py
 
 | PyTorch | Triton Version | Notes |
 |---------|----------------|-------|
-| >= 2.9 | 3.5.x | |
+| >= 2.10 | 3.6.x | Current stable PyTorch |
+| 2.9.x | 3.5.x | |
 | 2.8.x | 3.4.x | |
-| 2.7.x | 3.3.x | Current stable PyTorch |
+| 2.7.x | 3.3.x | |
 | 2.6.x | 3.2.x | |
 | < 2.6 | < 3.2 | Legacy |
 

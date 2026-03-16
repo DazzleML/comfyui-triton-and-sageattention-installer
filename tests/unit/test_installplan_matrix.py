@@ -87,6 +87,10 @@ SAGEATTENTION_MATRIX = [
     ("sa2_fresh_cu128", "2.8.0+cu128", "128", None, "INSTALL", "2.2.0"),
     ("sa1_fallback_no_wheel", "2.10.0+cu140", "140", None, "INSTALL", "1.0.6"),
 
+    # === Issue #29: PyTorch 2.10 + CUDA 13.0 (Blackwell/RTX 50xx) ===
+    ("sa2_fresh_cu130_torch210", "2.10.0+cu130", "130", None, "INSTALL", "2.2.0"),
+    ("sa2_fresh_cu128_torch210", "2.10.0+cu128", "128", None, "INSTALL", "2.2.0"),
+
     # === Existing SA - Keep scenarios ===
     ("sa2_keep_current", "2.9.1+cu130", "130", "2.2.0+cu130torch2.9", "KEEP", None),
     ("sa1_keep_no_upgrade", "2.10.0+cu140", "140", "1.0.6", "KEEP", None),
@@ -115,6 +119,9 @@ SAGEATTENTION_UPGRADE_MATRIX = [
     ("upgrade_sa2_patch", "2.9.1+cu130", "130", "2.1.0", "UPGRADE", "2.2.0"),
     ("upgrade_sa2_same", "2.9.1+cu130", "130", "2.2.0.post3", "KEEP", None),
     ("upgrade_no_wheel_keep_sa1", "2.10.0+cu140", "140", "1.0.6", "KEEP", None),
+
+    # === Issue #29: Upgrade SA1->SA2 on torch 2.10 + cu130 ===
+    ("upgrade_sa1_to_sa2_torch210", "2.10.0+cu130", "130", "1.0.6", "UPGRADE", "2.2.0"),
 ]
 
 # Triton compatibility - 12 scenarios

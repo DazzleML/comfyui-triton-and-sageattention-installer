@@ -5,6 +5,20 @@ All notable changes to the ComfyUI Triton and SageAttention installer will be do
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.5] - 2026-03-16
+
+Add SageAttention 2.x wheel support for PyTorch 2.10 + CUDA 13.0/12.8 environments, enabling SA 2.x on Blackwell GPUs (RTX 50-series). Uses the upstream "andhigher" forward-compatible wheels from woct0rdho/SageAttention v2.2.0-windows.post4.
+
+Thanks to [@joednemesis](https://github.com/DazzleML/comfyui-triton-and-sageattention-installer/issues/29) for reporting the missing configuration.
+
+### Added
+- **SA 2.x wheels for PyTorch 2.10**: CUDA 13.0 (`cu130`) and CUDA 12.8 (`cu128`) entries using the `torch2.9.0andhigher` ABI3 wheel ([Issue #29](https://github.com/DazzleML/comfyui-triton-and-sageattention-installer/issues/29))
+- **Wheel URL verification script**: `tests/one-offs/test_wheel_url_resolve.py` -- validates all wheel URLs resolve via HTTP HEAD
+- **Unit tests**: 3 new test scenarios for PyTorch 2.10 + cu130/cu128 SA matching and upgrade paths
+
+### Note
+- SageAttention's CUDA kernel path has known instability on some Blackwell GPUs (woct0rdho/SageAttention#87). The Triton fallback path works but may not provide acceleration. This is an upstream issue.
+
 ## [0.8.4] - 2026-02-27
 
 Schema versioning, delta-based dedup, and totals repair for the traffic collection workflow. Ports the mature data-quality fixes from NCSI v0.7.12 to eliminate silent data loss from boolean set-based dedup and phantom CI subtraction.
