@@ -5,6 +5,18 @@ All notable changes to the ComfyUI Triton and SageAttention installer will be do
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.7] - 2026-03-31
+
+Add SA 2.x wheel support for PyTorch 2.11 and promote post4 from experimental to stable for PyTorch 2.9.
+
+### Added
+- **SA 2.x wheels for PyTorch 2.11**: CUDA 13.0 (`cu130`) and CUDA 12.8 (`cu128`) entries using the existing `torch2.9.0andhigher` ABI3 wheel from woct0rdho/SageAttention v2.2.0-windows.post4
+- Verified working: PyTorch 2.11.0+cu130, Python 3.12.0, RTX 5090, SageAttention 2.2.0.post4
+
+### Changed
+- **Promote post4 for PyTorch 2.9**: SA 2.2.0.post4 no longer requires `--experimental` for torch 2.9.x. The same wheel already serves torch 2.10/2.11 as stable -- gating it for 2.9 was inconsistent. Post4 adds `torch.compile` support over post3 (same kernels otherwise) and is now the default for all torch >= 2.9 fresh installs. Existing post3 users are not affected (plan says KEEP).
+- **`--experimental` flag**: Now reports "no experimental wheels available" when all wheels are stable, instead of showing a misleading warning. The flag remains functional for future prerelease wheels.
+
 ## [0.8.6] - 2026-03-16
 
 Fix dryrun/actual divergence in Triton and SageAttention upgrade paths. Execution methods now consult the InstallPlan as single source of truth, matching the pattern established for PyTorch in Issue #18.

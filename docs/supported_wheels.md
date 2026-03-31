@@ -17,14 +17,16 @@ Uses ABI3 wheels compatible with Python 3.9+.
 
 ## SageAttention 2.2.0.post4
 
-Uses ABI3 "andhigher" wheels compatible with Python 3.9+ and PyTorch >= 2.9. For PyTorch 2.10+, these are the primary (non-experimental) wheels. For PyTorch 2.9.x, requires `--experimental` flag (post3 is the stable default).
+Uses ABI3 "andhigher" wheels compatible with Python 3.9+ and PyTorch >= 2.9. Adds `torch.compile` support over post3 (same kernels). Now the default for all PyTorch >= 2.9.
 
 | CUDA | PyTorch | Notes |
 |------|---------|-------|
+| 13.0 | 2.11.x | RTX 50-series / Blackwell |
+| 12.8 | 2.11.x | |
 | 13.0 | 2.10.x | RTX 50-series / Blackwell ([#29](https://github.com/DazzleML/comfyui-triton-and-sageattention-installer/issues/29)) |
 | 12.8 | 2.10.x | |
-| 13.0 | 2.9.x | Requires `--experimental` |
-| 12.8 | 2.9.x | Requires `--experimental` |
+| 13.0 | 2.9.x | |
+| 12.8 | 2.9.x | |
 
 ## SageAttention 2.1.1
 

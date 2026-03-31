@@ -43,7 +43,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 # Version information
-__version__ = "0.8.6"
+__version__ = "0.8.7"
 
 
 def parse_sage_version(version_str: str) -> Tuple[Optional[int], Optional[str]]:
@@ -2697,14 +2697,14 @@ class ComfyUIInstaller:
             ("2.2.0.post3", "126", "2.6", None, "v2.2.0-windows.post3", True, False, "2.6.0"),
             ("2.2.0.post3", "124", "2.5", None, "v2.2.0-windows.post3", True, False, "2.5.1"),
 
-            # === SA 2.2.0.post4 (ABI3) - EXPERIMENTAL (torch.compile support) ===
-            ("2.2.0.post4", "130", "2.9", None, "v2.2.0-windows.post4", True, True, "2.9.0andhigher"),
-            ("2.2.0.post4", "128", "2.9", None, "v2.2.0-windows.post4", True, True, "2.9.0andhigher"),
-
-            # === SA 2.2.0.post4 (ABI3) - PyTorch 2.10+ ("andhigher" forward-compat wheels) ===
-            # For torch 2.10+, post4 is the only available wheel (no post3 exists).
-            # Marked non-experimental since there is no stable alternative for these envs.
+            # === SA 2.2.0.post4 (ABI3) - PyTorch 2.9+ ("andhigher" forward-compat wheels) ===
+            # post4 adds torch.compile support over post3 (same kernels otherwise).
+            # Promoted from experimental: same wheel serves 2.10/2.11 as stable,
+            # no reason to gate it for 2.9. For torch 2.9 users, post4 now takes
+            # priority over post3 (matched first in config order).
             # Upstream confirmed working: woct0rdho/SageAttention#83, #86
+            ("2.2.0.post4", "130", "2.11", None, "v2.2.0-windows.post4", True, False, "2.9.0andhigher"),
+            ("2.2.0.post4", "128", "2.11", None, "v2.2.0-windows.post4", True, False, "2.9.0andhigher"),
             ("2.2.0.post4", "130", "2.10", None, "v2.2.0-windows.post4", True, False, "2.9.0andhigher"),
             ("2.2.0.post4", "128", "2.10", None, "v2.2.0-windows.post4", True, False, "2.9.0andhigher"),
 
@@ -4274,23 +4274,30 @@ class ComfyUIInstaller:
             print()
 
         if self.experimental:
-            print("EXPERIMENTAL MODE ENABLED")
-            print("WARNING: You have enabled experimental/prerelease versions.")
-            print("These versions may:")
-            print("   - Cause black or noisy outputs")
-            print("   - Have compatibility issues with some workflows")
-            print("   - Be less stable than release versions")
-            print()
-            print("Use --sage-version auto (without --experimental) to revert to stable.")
-            print()
-            if self.interactive:
-                response = input("Continue with experimental mode? (y/N): ")
-                if response.lower() != 'y':
-                    print("Installation cancelled.")
-                    return False
+            # Check if any experimental wheels actually exist in the config
+            has_experimental = any(entry[6] for entry in self._get_wheel_configs())
+            if has_experimental:
+                print("EXPERIMENTAL MODE ENABLED")
+                print("WARNING: You have enabled experimental/prerelease versions.")
+                print("These versions may:")
+                print("   - Cause black or noisy outputs")
+                print("   - Have compatibility issues with some workflows")
+                print("   - Be less stable than release versions")
+                print()
+                print("Use --sage-version auto (without --experimental) to revert to stable.")
+                print()
+                if self.interactive:
+                    response = input("Continue with experimental mode? (y/N): ")
+                    if response.lower() != 'y':
+                        print("Installation cancelled.")
+                        return False
+                else:
+                    print("Non-interactive experimental mode: proceeding...")
+                print()
             else:
-                print("Non-interactive experimental mode: proceeding...")
-            print()
+                print("NOTE: --experimental flag set, but no experimental wheels are currently")
+                print("available. All wheels are stable. Proceeding with standard installation.")
+                print()
 
         sage_attention_failed = False
         
