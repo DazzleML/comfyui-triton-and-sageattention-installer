@@ -49,6 +49,18 @@ Per-Python wheels (requires exact Python version match).
 | 12.1 | 2.4.x | 3.12 |
 | 11.8 | 2.4.x | 3.12 |
 
+## CUDA Minor-Version Aliases
+
+PyTorch publishes some CUDA minor versions that SageAttention does not build a dedicated wheel for. Where a nearby CUDA-minor wheel has been verified end-to-end (import + real attention kernel), the installer reuses it via CUDA's minor-version compatibility guarantee:
+
+| Detected CUDA | Wheel used | Status |
+|---------------|-----------|--------|
+| 12.9 (`cu129`) | `cu128` | Tested (Issue #32) — torch 2.9.0+cu129, cosine 0.99933 vs SDPA on RTX 5090 |
+
+Only verified aliases are enabled; any other CUDA-minor gap still falls back to SA 1.0.6 until individually tested.
+
+---
+
 ## SageAttention 1.0.6 (Fallback)
 
 Installed from PyPI when no pre-built SA2 wheel matches. Works with any Python 3.8+ and CUDA 11.8+.

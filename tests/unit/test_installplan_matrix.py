@@ -91,6 +91,13 @@ SAGEATTENTION_MATRIX = [
     ("sa2_fresh_cu130_torch210", "2.10.0+cu130", "130", None, "INSTALL", "2.2.0"),
     ("sa2_fresh_cu128_torch210", "2.10.0+cu128", "128", None, "INSTALL", "2.2.0"),
 
+    # === Issue #32: CUDA 12.9 resolves to cu128 wheel via tested alias ===
+    # No cu129 SA wheel exists upstream; cu128 wheel verified compatible
+    # (tests/one-offs/test_cuda129_compat.py). cu129 -> SA 2.x, not 1.x fallback.
+    ("sa2_cu129_alias_to_128", "2.9.0+cu129", "129", None, "INSTALL", "2.2.0"),
+    # An untested CUDA gap (cu127) must NOT alias -> stays on SA 1.x fallback.
+    ("sa1_fallback_cu127_untested", "2.9.0+cu127", "127", None, "INSTALL", "1.0.6"),
+
     # === Existing SA - Keep scenarios ===
     ("sa2_keep_current", "2.9.1+cu130", "130", "2.2.0+cu130torch2.9", "KEEP", None),
     ("sa1_keep_no_upgrade", "2.10.0+cu140", "140", "1.0.6", "KEEP", None),
@@ -461,6 +468,46 @@ def test_triton_action(mock_installer, name, triton_ver, torch_ver,
 # =============================================================================
 # CUDA DETECTION TESTS
 # =============================================================================
+
+class TestCudaWheelAlias:
+    """Test the CUDA minor-version wheel alias mechanism (Issue #32)."""
+
+    def test_exact_match(self, mock_installer):
+        """Exact CUDA codes always match."""
+        assert mock_installer._cuda_matches("128", "128") is True
+        assert mock_installer._cuda_matches("130", "130") is True
+
+    def test_tested_alias_matches(self, mock_installer):
+        """A cu128 wheel serves a detected cu129 environment (tested alias)."""
+        assert mock_installer._cuda_matches("128", "129") is True
+
+    def test_untested_gap_does_not_match(self, mock_installer):
+        """An untested CUDA gap (e.g. cu127) must not alias to anything."""
+        assert mock_installer._cuda_matches("128", "127") is False
+        assert mock_installer._cuda_matches("126", "127") is False
+
+    def test_alias_does_not_cross_major(self, mock_installer):
+        """The alias map must never bridge the 12.x <-> 13.x boundary."""
+        # cu130 wheel must not be offered to a cu129 (12.x) environment
+        assert mock_installer._cuda_matches("130", "129") is False
+        # and the only alias entry stays within CUDA 12
+        for detected, wheel in type(mock_installer).CUDA_WHEEL_ALIASES.items():
+            assert detected[:2] == wheel[:2], \
+                f"alias {detected}->{wheel} crosses CUDA major boundary"
+
+    def test_alias_resolves_to_cu128_wheel_url(self, mock_installer):
+        """cu129 + torch 2.9 + py312 resolves to the cu128 wheel (correct URL)."""
+        import platform
+        if platform.system() != "Windows":
+            import pytest
+            pytest.skip("wheel matching is Windows-only")
+        match = mock_installer._find_matching_wheel(
+            cuda_ver="129", torch_ver="2.9.0", python_ver="312"
+        )
+        assert match is not None, "cu129 should resolve via alias, not fall through"
+        assert match["cuda"] == "128"
+        assert "cu128torch2.9.0" in match["wheel_url"]
+
 
 class TestCudaDetection:
     """Test CUDA version detection priority."""

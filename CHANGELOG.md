@@ -5,6 +5,20 @@ All notable changes to the ComfyUI Triton and SageAttention installer will be do
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.8] - 2026-06-17
+
+Add SA 2.x support for CUDA 12.9 via a tested wheel alias. Previously, a PyTorch build reporting CUDA 12.9 fell back to SageAttention 1.x because no `cu129` wheel exists upstream.
+
+### Added
+- **CUDA 12.9 support**: `cu129` PyTorch environments now install SA 2.x using the `cu128` wheel, verified ABI-compatible via CUDA's minor-version compatibility ([Issue #32](https://github.com/DazzleML/comfyui-triton-and-sageattention-installer/issues/32))
+- **`CUDA_WHEEL_ALIASES`** map: a narrow, tested-only alias table (`129 -> 128`). Only combinations verified end-to-end (import + real attention kernel vs torch SDPA) are added, per the project's tested-only compatibility philosophy
+- **End-to-end test**: `tests/one-offs/test_cuda129_compat.py` builds an isolated cu129 venv, installs the cu128 SA wheel, and runs a real attention kernel — verified on RTX 5090, cosine 0.99933 vs torch SDPA
+- **Unit tests**: cu129-alias and untested-gap (cu127 stays on SA 1.x) scenarios; direct `_cuda_matches` helper coverage
+
+### Notes
+- The alias is deliberately narrow: only `cu129 -> cu128` (tested). Other CUDA-minor gaps still fall back to SA 1.x until individually verified. A broader gap-coverage sweep is tracked as a follow-up.
+- No system CUDA toolkit change is required — the matched CUDA runtime ships inside the PyTorch wheel; the installer keys off `torch.version.cuda`.
+
 ## [0.8.7] - 2026-03-31
 
 Add SA 2.x wheel support for PyTorch 2.11 and promote post4 from experimental to stable for PyTorch 2.9.

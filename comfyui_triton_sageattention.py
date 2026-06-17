@@ -43,7 +43,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 # Version information
-__version__ = "0.8.7"
+__version__ = "0.8.8"
 
 
 def parse_sage_version(version_str: str) -> Tuple[Optional[int], Optional[str]]:
@@ -2034,10 +2034,23 @@ class ComfyUIInstaller:
     
     # Packages to track for cleanup (matches batch script exactly)
     TRITON_PACKAGES = [
-        "triton-windows", "triton", "sageattention", 
+        "triton-windows", "triton", "sageattention",
         "torch", "torchvision", "torchaudio"
     ]
-    
+
+    # CUDA minor-version wheel aliases: detected_cuda_code -> wheel_cuda_code.
+    # When PyTorch reports a CUDA minor that has no dedicated SageAttention wheel,
+    # a wheel built for a nearby CUDA minor in the same major works thanks to
+    # CUDA's minor-version compatibility guarantee. ONLY combos verified
+    # end-to-end (import + real kernel vs torch SDPA) belong here, per the
+    # project's tested-only compatibility philosophy/rule.
+    #   "129" -> "128": verified 2026-06-17 (Issue #32) -- torch 2.9.0+cu129 with
+    #   sageattention-2.2.0+cu128torch2.9.0.post3, cosine 0.99933 vs SDPA on an
+    #   RTX 5090 (sm_120). See tests/one-offs/test_cuda129_compat.py.
+    CUDA_WHEEL_ALIASES = {
+        "129": "128",
+    }
+
     def __init__(self, base_path: Optional[Path] = None, verbose: bool = False,
                  interactive: bool = True, force: bool = False, sage_version: str = "auto",
                  experimental: bool = False, upgrade: bool = False, with_custom_nodes: bool = False,
@@ -2669,6 +2682,23 @@ class ComfyUIInstaller:
             return f"{cuda_code[0]}.{cuda_code[1]}"
         return cuda_code
 
+    def _cuda_matches(self, wheel_cuda: str, detected_cuda: str) -> bool:
+        """Whether a wheel's CUDA code serves the detected CUDA code.
+
+        Exact match always wins. Otherwise consult CUDA_WHEEL_ALIASES, which
+        maps a detected CUDA minor with no dedicated wheel to a tested-compatible
+        wheel CUDA minor (e.g., "129" -> "128"). Only end-to-end verified aliases
+        live in that map. The matched wheel config still carries its own CUDA code,
+        so URL construction automatically targets the correct (aliased) wheel.
+
+        Args:
+            wheel_cuda: CUDA code from a wheel config entry (e.g., "128").
+            detected_cuda: CUDA code detected from the environment (e.g., "129").
+        """
+        if wheel_cuda == detected_cuda:
+            return True
+        return wheel_cuda == self.CUDA_WHEEL_ALIASES.get(detected_cuda)
+
     def _get_wheel_configs(self) -> List[Tuple]:
         """Get the list of known wheel configurations.
 
@@ -2762,8 +2792,8 @@ class ComfyUIInstaller:
             if exact_version and not sage_ver.startswith(exact_version):
                 continue
 
-            # CUDA must match exactly
-            if cuda_whl != cuda_ver:
+            # CUDA must match (exact, or a tested minor-version alias)
+            if not self._cuda_matches(cuda_whl, cuda_ver):
                 continue
 
             # PyTorch matching
@@ -2845,8 +2875,8 @@ class ComfyUIInstaller:
             version_info[sage_ver]["pytorch_patterns"].add(torch_pattern)
             version_info[sage_ver]["cuda_versions"].add(cuda_whl)
 
-            # Check if this specific config matches
-            cuda_ok = (cuda_whl == cuda_ver)
+            # Check if this specific config matches (exact CUDA or tested alias)
+            cuda_ok = self._cuda_matches(cuda_whl, cuda_ver)
             torch_ok = False
             if "." in torch_pattern and torch_pattern.count(".") == 2:
                 torch_ok = (torch_ver == torch_pattern)
@@ -3763,8 +3793,8 @@ class ComfyUIInstaller:
                 if exact_version and not sage_ver.startswith(exact_version):
                     continue
 
-                # CUDA must match exactly
-                if cuda_whl != cuda_ver:
+                # CUDA must match (exact, or a tested minor-version alias)
+                if not self._cuda_matches(cuda_whl, cuda_ver):
                     continue
 
                 # PyTorch matching: pattern "2.7" matches "2.7.0", "2.7.1", etc.
