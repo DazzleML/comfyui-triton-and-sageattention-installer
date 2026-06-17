@@ -28,6 +28,14 @@ Uses ABI3 "andhigher" wheels compatible with Python 3.9+ and PyTorch >= 2.9. Add
 | 13.0 | 2.9.x | |
 | 12.8 | 2.9.x | |
 
+## SageAttention 2.2.0.post5
+
+Uses ABI3 "andhigher" wheels built against the PyTorch 2.10 ABI. **Requires Python 3.10+** (cp310-abi3, unlike post3/post4's cp39). Covers the PyTorch 2.12 line.
+
+| CUDA | PyTorch | Notes |
+|------|---------|-------|
+| 13.0 | 2.12.x | also serves CUDA 13.2 via alias |
+
 ## SageAttention 2.1.1
 
 Per-Python wheels (requires exact Python version match).
@@ -56,8 +64,9 @@ PyTorch publishes some CUDA minor versions that SageAttention does not build a d
 | Detected CUDA | Wheel used | Status |
 |---------------|-----------|--------|
 | 12.9 (`cu129`) | `cu128` | Tested (Issue #32) — torch 2.9.0+cu129, cosine 0.99933 vs SDPA on RTX 5090 |
+| 13.2 (`cu132`) | `cu130` | Tested — torch 2.12.0+cu132 + post5, cosine 0.99933 vs SDPA on RTX 5090 |
 
-Only verified aliases are enabled; any other CUDA-minor gap still falls back to SA 1.0.6 until individually tested.
+Only verified aliases are enabled; any other CUDA-minor gap still falls back to SA 1.0.6 until individually tested. The gap detector (`tests/one-offs/detect_cuda_wheel_gaps.py`) re-checks PyTorch vs SageAttention CUDA coverage on demand.
 
 ---
 

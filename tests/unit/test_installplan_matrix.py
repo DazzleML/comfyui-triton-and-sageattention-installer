@@ -98,6 +98,15 @@ SAGEATTENTION_MATRIX = [
     # An untested CUDA gap (cu127) must NOT alias -> stays on SA 1.x fallback.
     ("sa1_fallback_cu127_untested", "2.9.0+cu127", "127", None, "INSTALL", "1.0.6"),
 
+    # === CUDA 13.2 / PyTorch 2.12 -> cu130 post5 wheel (tested alias) ===
+    # cu132 has no SA wheel; cu130 post5 verified compatible
+    # (tests/one-offs/test_cuda132_compat.py). cu132 -> SA 2.x, not 1.x fallback.
+    ("sa2_cu132_alias_to_130", "2.12.0+cu132", "132", None, "INSTALL", "2.2.0"),
+    # torch 2.12 on cu130 directly (no alias) also resolves to the post5 wheel.
+    ("sa2_cu130_torch212", "2.12.0+cu130", "130", None, "INSTALL", "2.2.0"),
+    # torch 2.12 on cu126 has no safe SA wheel (post5 has no cu126) -> SA 1.x.
+    ("sa1_fallback_cu126_torch212", "2.12.0+cu126", "126", None, "INSTALL", "1.0.6"),
+
     # === Existing SA - Keep scenarios ===
     ("sa2_keep_current", "2.9.1+cu130", "130", "2.2.0+cu130torch2.9", "KEEP", None),
     ("sa1_keep_no_upgrade", "2.10.0+cu140", "140", "1.0.6", "KEEP", None),
@@ -478,8 +487,9 @@ class TestCudaWheelAlias:
         assert mock_installer._cuda_matches("130", "130") is True
 
     def test_tested_alias_matches(self, mock_installer):
-        """A cu128 wheel serves a detected cu129 environment (tested alias)."""
+        """Tested aliases: cu128 serves cu129; cu130 serves cu132."""
         assert mock_installer._cuda_matches("128", "129") is True
+        assert mock_installer._cuda_matches("130", "132") is True
 
     def test_untested_gap_does_not_match(self, mock_installer):
         """An untested CUDA gap (e.g. cu127) must not alias to anything."""
@@ -507,6 +517,42 @@ class TestCudaWheelAlias:
         assert match is not None, "cu129 should resolve via alias, not fall through"
         assert match["cuda"] == "128"
         assert "cu128torch2.9.0" in match["wheel_url"]
+
+
+class TestCu132AndPost5:
+    """CUDA 13.2 alias + post5 (cp310) wheel handling."""
+
+    def _match(self, inst, cuda, torch, py):
+        import platform
+        if platform.system() != "Windows":
+            import pytest
+            pytest.skip("wheel matching is Windows-only")
+        return inst._find_matching_wheel(cuda_ver=cuda, torch_ver=torch, python_ver=py)
+
+    def test_cu132_resolves_to_cu130_post5(self, mock_installer):
+        """cu132 + torch 2.12 + py312 -> cu130 post5 cp310 wheel via alias."""
+        m = self._match(mock_installer, "132", "2.12.0", "312")
+        assert m is not None and m["cuda"] == "130"
+        assert "cu130torch2.10.0andhigher.post5" in m["wheel_url"]
+        assert "cp310-abi3" in m["wheel_url"]
+
+    def test_cu130_torch212_direct(self, mock_installer):
+        """torch 2.12 on cu130 directly resolves to the same post5 wheel."""
+        m = self._match(mock_installer, "130", "2.12.0", "312")
+        assert m is not None and "post5" in m["wheel_url"]
+
+    def test_post5_requires_py310(self, mock_installer):
+        """post5 is cp310-abi3 -> Python 3.9 must NOT match (falls back)."""
+        assert self._match(mock_installer, "132", "2.12.0", "39") is None
+
+    def test_cu126_torch212_no_safe_wheel(self, mock_installer):
+        """torch 2.12 on cu126 has no safe SA wheel -> None (SA 1.x fallback)."""
+        assert self._match(mock_installer, "126", "2.12.0", "312") is None
+
+    def test_abi3_cp_helper(self, mock_installer):
+        """_abi3_cp maps the py_spec field to (cp_tag, python_floor)."""
+        assert mock_installer._abi3_cp(None) == ("cp39", 39)
+        assert mock_installer._abi3_cp("310") == ("cp310", 310)
 
 
 class TestCudaDetection:

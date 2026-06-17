@@ -32,9 +32,11 @@ def main():
     cuda_build = torch.version.cuda
     log(f"INFO: torch={torch_ver} torch.version.cuda={cuda_build}")
 
-    if cuda_build != "12.9":
-        log(f"RESULT: WARN cuda_build_unexpected expected=12.9 got={cuda_build}")
-        # not fatal to the kernel test, but the whole point is cu129 -- flag loudly
+    # Optional expected CUDA build (e.g. "12.9" or "13.2") passed as argv[1];
+    # only a sanity WARN, never fatal to the kernel test.
+    expected_cuda = sys.argv[1] if len(sys.argv) > 1 else None
+    if expected_cuda and cuda_build != expected_cuda:
+        log(f"RESULT: WARN cuda_build_unexpected expected={expected_cuda} got={cuda_build}")
 
     # --- 2. CUDA device ---
     if not torch.cuda.is_available():

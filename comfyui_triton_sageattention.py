@@ -43,7 +43,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 # Version information
-__version__ = "0.8.8"
+__version__ = "0.8.9"
 
 
 def parse_sage_version(version_str: str) -> Tuple[Optional[int], Optional[str]]:
@@ -2047,8 +2047,12 @@ class ComfyUIInstaller:
     #   "129" -> "128": verified 2026-06-17 (Issue #32) -- torch 2.9.0+cu129 with
     #   sageattention-2.2.0+cu128torch2.9.0.post3, cosine 0.99933 vs SDPA on an
     #   RTX 5090 (sm_120). See tests/one-offs/test_cuda129_compat.py.
+    #   "132" -> "130": verified 2026-06-17 -- torch 2.12.0+cu132 with
+    #   sageattention-2.2.0+cu130torch2.10.0andhigher.post5, cosine 0.99933 vs
+    #   SDPA on an RTX 5090 (sm_120). See tests/one-offs/test_cuda132_compat.py.
     CUDA_WHEEL_ALIASES = {
         "129": "128",
+        "132": "130",
     }
 
     def __init__(self, base_path: Optional[Path] = None, verbose: bool = False,
@@ -2699,6 +2703,20 @@ class ComfyUIInstaller:
             return True
         return wheel_cuda == self.CUDA_WHEEL_ALIASES.get(detected_cuda)
 
+    @staticmethod
+    def _abi3_cp(py_spec: Optional[str]) -> Tuple[str, int]:
+        """Return (cp_tag, python_floor) for an ABI3 wheel from its py_spec field.
+
+        ABI3 wheels reuse the py_spec field to carry their cp ABI tag:
+        - None  -> ("cp39",  39)  -- the original ABI3 wheels (Python 3.9+)
+        - "310" -> ("cp310", 310) -- post5 wheels (Python 3.10+)
+
+        The floor (an int like 39 or 310) is comparable to the runtime
+        py_int (e.g., 312 for Python 3.12) for the minimum-version gate.
+        """
+        spec = py_spec or "39"
+        return f"cp{spec}", int(spec)
+
     def _get_wheel_configs(self) -> List[Tuple]:
         """Get the list of known wheel configurations.
 
@@ -2711,7 +2729,8 @@ class ComfyUIInstaller:
             - sage_ver: SageAttention version (e.g., "2.2.0.post3")
             - cuda: CUDA version code (e.g., "128" for 12.8)
             - torch_pattern: PyTorch pattern for matching (e.g., "2.7" matches 2.7.x, "2.7.0" matches exact)
-            - py_spec: Python version spec (None for ABI3, or "312" for exact match)
+            - py_spec: Python cp tag. Per-Python wheels: exact match (e.g., "312").
+              ABI3 wheels: minimum cp tag (None = cp39/Python 3.9+; "310" = cp310/3.10+).
             - tag: GitHub release tag (e.g., "v2.2.0-windows.post3")
             - is_abi3: Whether this is an ABI3 wheel (Python 3.9+ compatible)
             - is_experimental: Whether this is an experimental/prerelease wheel
@@ -2737,6 +2756,16 @@ class ComfyUIInstaller:
             ("2.2.0.post4", "128", "2.11", None, "v2.2.0-windows.post4", True, False, "2.9.0andhigher"),
             ("2.2.0.post4", "130", "2.10", None, "v2.2.0-windows.post4", True, False, "2.9.0andhigher"),
             ("2.2.0.post4", "128", "2.10", None, "v2.2.0-windows.post4", True, False, "2.9.0andhigher"),
+
+            # === SA 2.2.0.post5 (ABI3 cp310) - PyTorch 2.12 ("andhigher" from 2.10) ===
+            # post5 is built against the torch 2.10 ABI and is cp310-abi3 (Python 3.10+,
+            # vs post4's cp39). It is the wheel that covers the torch 2.12 line; post4's
+            # 2.9.0-built andhigher is not relied on for 2.12. Non-experimental because
+            # it is the only option for torch 2.12 (same rationale as post4 for 2.10).
+            # py_spec "310" carries the cp310 ABI tag. cu130 entry also serves cu132 via
+            # the "132" -> "130" alias. Verified 2026-06-17: torch 2.12.0+cu132 + this
+            # wheel, cosine 0.99933 vs SDPA on RTX 5090. See test_cuda132_compat.py.
+            ("2.2.0.post5", "130", "2.12", "310", "v2.2.0-windows.post5", True, False, "2.10.0andhigher"),
 
             # === SA 2.1.1 (per-Python) - for --sage-version 2.1.1 requests ===
             # Non-ABI3 wheels: torch_filename_ver is same as torch_pattern (exact match)
@@ -2806,7 +2835,8 @@ class ComfyUIInstaller:
 
             # Python matching
             if is_abi3:
-                if py_int < 39:
+                _, py_floor = self._abi3_cp(py_spec)
+                if py_int < py_floor:
                     continue
             else:
                 if py_spec != python_ver:
@@ -2885,7 +2915,8 @@ class ComfyUIInstaller:
 
             python_ok = False
             if is_abi3:
-                python_ok = (py_int >= 39)
+                _, py_floor = self._abi3_cp(py_spec)
+                python_ok = (py_int >= py_floor)
             else:
                 python_ok = (py_spec == python_ver)
 
@@ -3726,7 +3757,8 @@ class ComfyUIInstaller:
         base_url = f"https://github.com/woct0rdho/SageAttention/releases/download/{tag}"
 
         if is_abi3:
-            # ABI3 wheels have format: sageattention-2.2.0+cu128torch2.7.1.post3-cp39-abi3-win_amd64.whl
+            # ABI3 wheels: sageattention-2.2.0+cu128torch2.7.1.post3-cp39-abi3-win_amd64.whl
+            # (post5 switched the ABI tag to cp310; the tag comes from py_spec.)
             # Note: sage version in filename is base (2.2.0), .postX is appended to torch version
             sage_base = sage_ver.split(".post")[0] if ".post" in sage_ver else sage_ver
 
@@ -3742,7 +3774,8 @@ class ComfyUIInstaller:
             else:
                 torch_filename = torch_pattern + ".0" + post_suffix
 
-            wheel_name = f"sageattention-{sage_base}+cu{cuda}torch{torch_filename}-cp39-abi3-win_amd64.whl"
+            cp_tag, _ = self._abi3_cp(py_spec)
+            wheel_name = f"sageattention-{sage_base}+cu{cuda}torch{torch_filename}-{cp_tag}-abi3-win_amd64.whl"
         else:
             # Regular wheels: sageattention-2.1.1+cu128torch2.7.0-cp312-cp312-win_amd64.whl
             wheel_name = f"sageattention-{sage_ver}+cu{cuda}torch{torch_pattern}-cp{py_spec}-cp{py_spec}-win_amd64.whl"
@@ -3809,8 +3842,9 @@ class ComfyUIInstaller:
 
                 # Python matching
                 if is_abi3:
-                    # ABI3 wheels work with Python 3.9+
-                    if py_int < 39:
+                    # ABI3 wheels work with Python >= their cp floor (cp39 or cp310)
+                    _, py_floor = self._abi3_cp(py_spec)
+                    if py_int < py_floor:
                         continue
                 else:
                     # Exact Python version required

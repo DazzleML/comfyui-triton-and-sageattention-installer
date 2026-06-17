@@ -5,6 +5,23 @@ All notable changes to the ComfyUI Triton and SageAttention installer will be do
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.9] - 2026-06-17
+
+Add SA 2.x support for CUDA 13.2 / PyTorch 2.12 via a tested wheel alias, and bring the installer current with the upstream post5 wheels. Found by the CUDA-minor gap sweep that followed Issue #32.
+
+### Added
+- **CUDA 13.2 support**: `cu132` PyTorch environments install SA 2.x using the `cu130` wheel (CUDA minor-version compatibility, same approach as cu129→cu128). Alias `132 → 130` added to `CUDA_WHEEL_ALIASES`.
+- **SageAttention post5 wheels (PyTorch 2.12)**: `cu130torch2.10.0andhigher.post5` entry for the torch 2.12 line. post5 is **cp310-abi3** (Python 3.10+), so `_build_wheel_url()` and wheel matching now derive the ABI tag per-wheel (`_abi3_cp()` helper) instead of hardcoding `cp39`. Non-experimental — it is the only wheel covering torch 2.12.
+- **End-to-end test**: `tests/one-offs/test_cuda132_compat.py` — isolated cu132 venv, torch 2.12.0+cu132, post5 cu130 wheel, real attention kernel vs torch SDPA. Verified on RTX 5090: cosine 0.99933.
+- **Gap detector**: `tests/one-offs/detect_cuda_wheel_gaps.py` — read-only tool that diffs PyTorch's published CUDA minors against SageAttention's, flagging fillable gaps (re-run as upstream releases).
+- **Unit tests**: cu132 alias, torch 2.12 direct/fallback scenarios, cp310 Python floor, and `_abi3_cp` helper coverage.
+
+### Changed
+- `_cuda129_inner_kernel_test.py` takes an optional expected-CUDA argument (shared by the cu129 and cu132 harnesses).
+
+### Notes
+- cu118/cu121 remain on SA 1.x: they have no safe lower same-major SA wheel to alias down to (CUDA minor-compat is forward-only). torch 2.12 on cu126 also falls back (post5 has no cu126 wheel).
+
 ## [0.8.8] - 2026-06-17
 
 Add SA 2.x support for CUDA 12.9 via a tested wheel alias. Previously, a PyTorch build reporting CUDA 12.9 fell back to SageAttention 1.x because no `cu129` wheel exists upstream.
