@@ -5,6 +5,19 @@ All notable changes to the ComfyUI Triton and SageAttention installer will be do
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.10] - 2026-07-23
+
+Add SA 2.x support for PyTorch 2.13 (CUDA 13.0/13.2), and move the "andhigher" wheels from post5 to post6 to pick up an upstream black/noise output fix.
+
+### Added
+- **PyTorch 2.13 support**: `cu130` + torch 2.13 environments install SA 2.x (previously fell back to SA 1.x) ([Issue #33](https://github.com/DazzleML/comfyui-triton-and-sageattention-installer/issues/33)). CUDA 13.2 + torch 2.13 is also covered via the existing `132 → 130` alias. Verified on RTX 5090: cosine 0.99933 vs torch SDPA.
+
+### Changed
+- **andhigher wheels moved post5 → post6** (torch 2.12 and 2.13): post6 fixes an out-of-bound bug that could cause black/noise outputs ([woct0rdho/SageAttention#98](https://github.com/woct0rdho/SageAttention/pull/98)). post5 (shipped for torch 2.12 in v0.8.9) has that bug. Both torch 2.12+post6 and torch 2.13+post6 verified end-to-end (cosine 0.99933). Non-experimental — the andhigher wheel is the only option for these torch versions.
+
+### Notes
+- Existing torch 2.12 users on post5 are **not** force-migrated: a plain `--install` keeps the current SA install (plan says KEEP). Run `--upgrade` to move to the fixed post6 wheel. post5 remains a valid upstream wheel with the noted caveat.
+
 ## [0.8.9] - 2026-06-17
 
 Add SA 2.x support for CUDA 13.2 / PyTorch 2.12 via a tested wheel alias, and bring the installer current with the upstream post5 wheels. Found by the CUDA-minor gap sweep that followed Issue #32.

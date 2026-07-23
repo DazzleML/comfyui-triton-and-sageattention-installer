@@ -28,13 +28,16 @@ Uses ABI3 "andhigher" wheels compatible with Python 3.9+ and PyTorch >= 2.9. Add
 | 13.0 | 2.9.x | |
 | 12.8 | 2.9.x | |
 
-## SageAttention 2.2.0.post5
+## SageAttention 2.2.0.post6
 
-Uses ABI3 "andhigher" wheels built against the PyTorch 2.10 ABI. **Requires Python 3.10+** (cp310-abi3, unlike post3/post4's cp39). Covers the PyTorch 2.12 line.
+Uses ABI3 "andhigher" wheels built against the PyTorch 2.10 ABI. **Requires Python 3.10+** (cp310-abi3, unlike post3/post4's cp39). Covers the PyTorch 2.12 and 2.13 lines.
 
 | CUDA | PyTorch | Notes |
 |------|---------|-------|
+| 13.0 | 2.13.x | Issue #33; also serves CUDA 13.2 via alias |
 | 13.0 | 2.12.x | also serves CUDA 13.2 via alias |
+
+post6 is used in place of post5 because it fixes an out-of-bound bug that could cause black/noise outputs ([woct0rdho/SageAttention#98](https://github.com/woct0rdho/SageAttention/pull/98)). post5 is still a valid wheel but carries that bug; existing post5 users can run `--upgrade` to move to post6.
 
 ## SageAttention 2.1.1
 

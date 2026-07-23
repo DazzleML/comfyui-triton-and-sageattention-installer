@@ -1,18 +1,18 @@
-"""End-to-end test: CUDA 13.2 PyTorch x cu130 SageAttention post5 wheel.
+"""End-to-end test: CUDA 13.2 PyTorch x cu130 SageAttention post6 wheel.
 
 Companion to test_cuda129_compat.py, for the second tested CUDA-minor gap:
   Does a SageAttention wheel built for cu130 (and torch 2.10 ABI) work on a
   PyTorch built for cu132 + torch 2.12? CUDA 13.x minor-version compatibility
   says it should -- this verifies it (import + real kernel vs torch SDPA).
 
-This also exercises the post5 wheel line, which is cp310-abi3 (Python 3.10+)
+This also exercises the post6 wheel line, which is cp310-abi3 (Python 3.10+)
 rather than post3/post4's cp39, and the "132" -> "130" CUDA alias.
 
 What it does (no system CUDA change -- the cu132 runtime ships in the torch wheel):
   1. Create a slim throwaway venv (NOT the project/ComfyUI venv)
   2. Install torch 2.12.0+cu132 from the PyTorch cu132 index
   3. Install triton-windows (3.6.x for torch 2.12) + numpy
-  4. Install SA 2.2.0.post5 cu130torch2.10.0andhigher wheel (cp310-abi3)
+  4. Install SA 2.2.0.post6 cu130torch2.10.0andhigher wheel (cp310-abi3)
   5. Run _cuda129_inner_kernel_test.py inside that venv (import + real kernel + SDPA)
   6. Report PASS/FAIL; tear down venv unless --keep
 
@@ -29,15 +29,15 @@ import subprocess
 import sys
 from pathlib import Path
 
-# torch 2.12 + cu132 is the gap; cu130 post5 (torch 2.10 ABI, cp310) is the wheel.
+# torch 2.12 + cu132 is the gap; cu130 post6 (torch 2.10 ABI, cp310) is the wheel.
 TORCH_SPEC = "torch==2.12.0+cu132"
 TORCH_INDEX = "https://download.pytorch.org/whl/cu132"
 TRITON_SPEC = "triton-windows>=3.6,<4"
 EXTRA_DEPS = ["numpy"]
 SA_WHEEL_URL = (
     "https://github.com/woct0rdho/SageAttention/releases/download/"
-    "v2.2.0-windows.post5/"
-    "sageattention-2.2.0+cu130torch2.10.0andhigher.post5-cp310-abi3-win_amd64.whl"
+    "v2.2.0-windows.post6/"
+    "sageattention-2.2.0+cu130torch2.10.0andhigher.post6-cp310-abi3-win_amd64.whl"
 )
 EXPECTED_CUDA = "13.2"
 
@@ -55,7 +55,7 @@ def venv_python(venv_path: Path) -> Path:
 
 
 def main():
-    ap = argparse.ArgumentParser(description="cu132 x cu130-post5 compatibility test")
+    ap = argparse.ArgumentParser(description="cu132 x cu130-post6 compatibility test")
     ap.add_argument("--venv-path", type=Path, default=DEFAULT_VENV)
     ap.add_argument("--torch-spec", default=TORCH_SPEC)
     ap.add_argument("--torch-index", default=TORCH_INDEX)
@@ -115,7 +115,7 @@ def main():
 
         print("\n" + "=" * 64)
         if inner_rc == 0:
-            print("OVERALL: PASS  -- cu130 post5 wheel works on cu132 torch 2.12")
+            print("OVERALL: PASS  -- cu130 post6 wheel works on cu132 torch 2.12")
         else:
             print(f"OVERALL: FAIL  -- inner test returned {inner_rc}")
         print("=" * 64)
