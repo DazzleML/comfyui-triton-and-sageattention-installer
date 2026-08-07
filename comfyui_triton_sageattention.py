@@ -43,7 +43,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 # Version information
-__version__ = "0.8.10"
+__version__ = "0.8.11"
 
 
 def parse_sage_version(version_str: str) -> Tuple[Optional[int], Optional[str]]:
@@ -2196,10 +2196,93 @@ class ComfyUIInstaller:
         
         return cuda_version
     
+    @staticmethod
+    def _parse_setuptools_constraint(raw_reqs: List[str]) -> str:
+        """Build a pip requirement for setuptools from installed packages' requirements.
+
+        Args:
+            raw_reqs: Raw requirement strings declared by installed distributions,
+                e.g. ["setuptools<82", 'setuptools>=77.0.3; python_version < "3.12"'].
+
+        Returns:
+            A pip requirement string: "setuptools<82" when constrained, or plain
+            "setuptools" when nothing installed constrains it.
+        """
+        specs = []
+        for raw in raw_reqs or []:
+            base, _, marker = raw.partition(";")
+            # Extras-conditional requirements only apply when that extra is
+            # installed, which we cannot determine here -- skip them.
+            if "extra" in marker:
+                continue
+            match = re.match(r"^\s*setuptools\s*(.*)$", base, re.IGNORECASE)
+            if not match:
+                continue
+            # Drop any bracketed extras, e.g. "setuptools[core]>=70" -> ">=70"
+            spec = re.sub(r"^\[[^\]]*\]", "", match.group(1).strip()).strip()
+            if spec:
+                specs.append(spec)
+
+        if not specs:
+            return "setuptools"
+        # pip accepts comma-joined specifiers, e.g. "setuptools<82,>=77.0.3"
+        return "setuptools" + ",".join(sorted(set(specs)))
+
+    def _get_installed_setuptools_requirements(self) -> Optional[List[str]]:
+        """Query the target environment for setuptools requirements of installed packages.
+
+        Returns:
+            List of raw requirement strings (possibly empty if nothing constrains
+            setuptools), or None if the query could not be run.
+        """
+        code = (
+            "import importlib.metadata as md;"
+            "print('\\n'.join(r for d in md.distributions() "
+            "for r in (d.requires or []) if r.lower().startswith('setuptools')))"
+        )
+        try:
+            result = self.handler.run_command(
+                [str(self.handler.python_path), "-c", code], capture_output=True
+            )
+            return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+        except Exception as e:
+            self.logger.debug(f"Could not query setuptools requirements: {e}")
+            return None
+
     def upgrade_pip_setuptools(self):
-        """Upgrade pip and setuptools."""
-        print("Upgrading pip and setuptools...")
-        self.handler.pip_install(["pip", "setuptools"], ["--upgrade"])
+        """Upgrade pip, and setuptools within constraints declared by installed packages.
+
+        Installed packages can declare an upper bound on setuptools -- notably
+        PyTorch 2.12.x requires setuptools<82. Upgrading setuptools past that bound
+        leaves the environment in a state pip itself reports as broken (Issue #34):
+
+            ERROR: pip's dependency resolver does not currently take into account...
+            torch 2.12.1+cu130 requires setuptools<82, but you have setuptools 83.0.0
+
+        pip exits 0 there, so the install continues, but the environment is left
+        violating a constraint its own packages declare. We therefore discover those
+        constraints first and upgrade only within them.
+        """
+        # flush so these lines land before pip's own (subprocess) output when
+        # stdout is piped/redirected rather than attached to a terminal
+        print("Upgrading pip and setuptools...", flush=True)
+
+        raw_reqs = self._get_installed_setuptools_requirements()
+        if raw_reqs is None:
+            # Discovery failed -- don't risk breaking a working environment by
+            # upgrading setuptools blind. pip alone is safe.
+            self.logger.warning(
+                "Could not determine setuptools constraints - upgrading pip only"
+            )
+            self.handler.pip_install(["pip"], ["--upgrade"])
+            return
+
+        setuptools_spec = self._parse_setuptools_constraint(raw_reqs)
+        if setuptools_spec != "setuptools":
+            print(f"  Respecting installed constraint: {setuptools_spec}", flush=True)
+            self.logger.info(f"setuptools constrained by installed packages: {setuptools_spec}")
+
+        self.handler.pip_install(["pip", setuptools_spec], ["--upgrade"])
     
     def install_pytorch(self, cuda_version: str):
         """Install PyTorch with appropriate CUDA support.

@@ -5,6 +5,29 @@ All notable changes to the ComfyUI Triton and SageAttention installer will be do
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.11] - 2026-08-07
+
+Stop upgrading setuptools past bounds declared by installed packages, which left environments in a state pip itself reports as broken.
+
+### Fixed
+- **setuptools dependency conflict** ([Issue #34](https://github.com/DazzleML/comfyui-triton-and-sageattention-installer/issues/34)): the installer ran `pip install --upgrade pip setuptools` unconditionally, pushing setuptools past upper bounds declared by installed packages. PyTorch 2.12.x requires `setuptools<82`, so pip reported:
+
+  ```
+  ERROR: pip's dependency resolver does not currently take into account all the packages
+  that are installed. ...
+  torch 2.12.1+cu130 requires setuptools<82, but you have setuptools 83.0.0 which is incompatible.
+  ```
+
+  pip exits 0, so installation continued ("it works anyway"), but the environment was left violating a constraint its own packages declare — `pip check` flagged it. The installer now discovers setuptools constraints from installed packages and upgrades only within them.
+
+### Changed
+- `upgrade_pip_setuptools()` consults installed package metadata before upgrading. When a constraint exists it is shown (`Respecting installed constraint: setuptools<82`); when none exists, behavior is unchanged. If constraints cannot be determined, only pip is upgraded rather than risk modifying a working environment.
+
+### Notes
+- **Existing broken environments are repaired.** If a previous run left setuptools above the bound, the next run brings it back into range (verified: `pip check` goes from broken to `No broken requirements found`).
+- Only PyTorch 2.12.x declares an upper bound today; torch 2.13 declares `setuptools>=77.0.3` with no ceiling, so those environments were never affected.
+- This was the only unconditional environment mutation in the install flow — every other pip call is gated by the InstallPlan.
+
 ## [0.8.10] - 2026-07-23
 
 Add SA 2.x support for PyTorch 2.13 (CUDA 13.0/13.2), and move the "andhigher" wheels from post5 to post6 to pick up an upstream black/noise output fix.
