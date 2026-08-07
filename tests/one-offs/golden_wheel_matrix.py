@@ -138,7 +138,7 @@ def emit_sa_version_match(inst, out):
 def emit_setuptools(inst, out):
     out.append("")
     out.append("=" * 78)
-    out.append("SECTION 7: _parse_setuptools_constraint (Issue #34)")
+    out.append("SECTION 7: _parse_constraint (Issue #34)")
     out.append("=" * 78)
     cases = [
         [], None, ["setuptools"], ["setuptools<82"], ["setuptools>=77.0.3"],
@@ -148,7 +148,7 @@ def emit_setuptools(inst, out):
         ["setuptools[core]>=70"], ["numpy>=1.0"], ["  setuptools  <82  "],
     ]
     for c in cases:
-        out.append(f"{c!r} -> {ComfyUIInstaller._parse_setuptools_constraint(c)!r}")
+        out.append(f"{c!r} -> {ComfyUIInstaller._parse_constraint("setuptools", c)!r}")
 
 
 def emit_cuda_format(inst, out):

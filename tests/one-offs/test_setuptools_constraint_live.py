@@ -106,8 +106,8 @@ def main():
         inst = build_installer(py)
 
         # --- 1. discovery finds torch's declared bound ---
-        raw = inst._get_installed_setuptools_requirements()
-        spec = inst._parse_setuptools_constraint(raw)
+        raw = inst._get_installed_requirements("setuptools")
+        spec = inst._parse_constraint("setuptools", raw)
         print(f"\n[1] discovered: raw={raw} -> spec={spec!r}")
         if spec != "setuptools<82":
             failures.append(f"expected 'setuptools<82', discovered {spec!r}")

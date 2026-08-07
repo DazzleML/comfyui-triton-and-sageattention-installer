@@ -197,7 +197,10 @@ def mock_installer():
         installer.with_custom_nodes = False
         installer.sage_version_raw = "auto"
         installer.sage_version_major = None
-        installer.sage_version_specific = None
+        # Real class sets `sage_version_exact` (see __init__). A phantom
+        # `sage_version_specific` here went unnoticed while the plan layer ignored
+        # the request (D1); it AttributeErrors as soon as the plan reads it.
+        installer.sage_version_exact = None
 
         # Logger
         installer.logger = Mock()

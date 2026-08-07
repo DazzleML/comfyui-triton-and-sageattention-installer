@@ -119,7 +119,7 @@ For full parameter documentation, see [docs/parameters.md](docs/parameters.md).
 
 ### SageAttention Version Control
 
-Control which SageAttention version gets installed (default: SA 2.2.0.post3):
+Control which SageAttention version gets installed. By default the installer picks the newest wheel that matches your CUDA, PyTorch and Python versions, falling back to SageAttention 1.0.6 if none does — run `--install --dryrun` to see which one it would choose for your setup:
 
 ```bash
 # Explicitly install SageAttention 1 (~2.1x speedup, more compatible) or 2 (~3x speedup)

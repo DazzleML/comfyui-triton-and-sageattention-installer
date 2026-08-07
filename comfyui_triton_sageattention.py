@@ -43,7 +43,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 # Version information
-__version__ = "0.8.11"
+__version__ = "0.8.12"
 
 
 def parse_sage_version(version_str: str) -> Tuple[Optional[int], Optional[str]]:
@@ -212,7 +212,20 @@ class InstallPlan:
 
     # Wheel compatibility info (for display)
     sa_wheel_url: Optional[str] = None
-    sa_wheel_available: bool = False
+    # Tri-state. True/False are real answers about the current environment.
+    # None means "not knowable yet" -- PyTorch is itself being installed in this
+    # run, and pip picks its version against a live index, so the wheel that
+    # matches cannot be determined until after that step. Displaying False here
+    # would assert the SA 1.x fallback that execution then contradicts.
+    sa_wheel_available: Optional[bool] = False
+    # Why the wheel is unknown, shown verbatim when sa_wheel_available is None.
+    sa_wheel_note: Optional[str] = None
+
+    # Whether install() should touch pip/setuptools at all. This was the last
+    # environment mutation not gated by the plan: a run whose components were all
+    # KEEP still uninstalled and upgraded setuptools, and the preview never said
+    # so. Build tooling is only needed when something is actually being built.
+    build_tools_upgrade_needed: bool = True
 
     def has_changes(self) -> bool:
         """Check if any components will be modified."""
@@ -893,8 +906,51 @@ class ComfyUIInstallerError(Exception):
 class PlatformHandler(ABC):
     """Abstract base class for platform-specific installation handlers."""
 
+    # PyTorch wheel indexes that are incomplete, mapped to the nearest complete one.
+    #
+    # Measured 2026-08-07 against download.pytorch.org: the cu132 index publishes
+    # torch and torchvision for cp310-cp314 but ZERO torchaudio wheels on any
+    # platform (Windows and Linux both). Because the installer asks pip for
+    # torch + torchvision + torchaudio in one transaction, the missing package
+    # fails the whole command and nothing is installed -- so a fresh install on a
+    # CUDA 13.2 machine could not complete at all. cu130 resolves the full set,
+    # and CUDA minor versions are forward-compatible, so cu130 builds run on a
+    # 13.2 driver.
+    #
+    # Deliberately NOT shared with ComfyUIInstaller.CUDA_WHEEL_ALIASES. That table
+    # answers "which SageAttention wheel do we ship for this CUDA"; this one answers
+    # "which PyTorch index actually has a complete set". They happen to agree on
+    # 132 -> 130 today, but they are answers to different questions and will drift:
+    # CUDA_WHEEL_ALIASES also maps 129 -> 128, while the cu129 index is complete
+    # and must NOT be redirected.
+    #
+    # Only add an entry with measured evidence for that specific index, and remove
+    # it once upstream publishes the missing wheels.
+    PYTORCH_INDEX_ALIASES = {
+        "132": "130",
+    }
+
+    #: Filename of the launcher this platform writes. Subclasses override.
+    RUN_SCRIPT_NAME = "run_comfyui.sh"
+
+    def get_run_script_path(self) -> Path:
+        """Where create_run_script() would write, without writing it."""
+        return self.base_path / self.RUN_SCRIPT_NAME
+
+    @classmethod
+    def pytorch_index_cuda(cls, cuda_version: str) -> str:
+        """Map a detected CUDA version to the tag of a complete PyTorch index.
+
+        Returns the tag unchanged unless that index is known to be missing wheels.
+        A classmethod so the planner can consult it without a handler instance --
+        the preview must show the index the install will actually use.
+        """
+        tag = cuda_version.replace(".", "")
+        return cls.PYTORCH_INDEX_ALIASES.get(tag, tag)
+
     def __init__(self, base_path: Path, logger: logging.Logger, interactive: bool = True,
-                 force: bool = False, python_specifier: Tuple[str, Optional[Path]] = ("auto", None)):
+                 force: bool = False, python_specifier: Tuple[str, Optional[Path]] = ("auto", None),
+                 may_create_env: bool = True):
         self.base_path = base_path
         self.logger = logger
         self.interactive = interactive
@@ -903,6 +959,12 @@ class PlatformHandler(ABC):
         self.python_path = None
         self.venv_path = None
         self.environment_type = "unknown"  # "portable", "venv", "system"
+        # Environment discovery happens for every command, but CREATING one is
+        # only appropriate when something is about to be installed into it.
+        # Reporting and backup commands set this False -- running
+        # `--backup-clean` from a directory that is not a ComfyUI install used to
+        # build a venv there as a side effect of asking what backups existed.
+        self.may_create_env = may_create_env
         self._setup_python_environment()
         
     @abstractmethod
@@ -981,7 +1043,9 @@ class PlatformHandler(ABC):
 
 class WindowsHandler(PlatformHandler):
     """Windows-specific installation handler."""
-    
+
+    RUN_SCRIPT_NAME = "run_nvidia_gpu.bat"
+
     BUILD_TOOLS_CONFIG = {
         "installer_id": "Microsoft.VisualStudio.2022.BuildTools",
         "components": [
@@ -1121,6 +1185,16 @@ class WindowsHandler(PlatformHandler):
             self.venv_path = venv_path
             self.environment_type = "venv"
             self.logger.info(f"Using existing virtual environment: {self.python_path}")
+        elif not self.may_create_env:
+            # Read-only operation: report against system Python rather than
+            # building an environment the user did not ask for.
+            self.python_path = Path(sys.executable)
+            self.venv_path = None
+            self.environment_type = "system"
+            self.logger.info(
+                "No virtual environment here; using system Python for this command "
+                "(none created -- pass --install or --upgrade to create one)"
+            )
         else:
             # Create new virtual environment
             self.logger.info("Creating new virtual environment...")
@@ -1165,8 +1239,7 @@ class WindowsHandler(PlatformHandler):
             print("WARNING: Visual Studio Build Tools already installed but --force specified")
             print("This may reinstall or modify existing build tools")
             if self.interactive:
-                response = input("Continue with forced installation? (y/N): ")
-                if response.lower() != 'y':
+                if not self._confirm("Continue with forced installation?"):
                     self.logger.info("Skipping build tools installation")
                     return True
         
@@ -1293,12 +1366,12 @@ class WindowsHandler(PlatformHandler):
         """Get PyTorch installation URL for Windows."""
         if cuda_version == "cpu":
             return "https://download.pytorch.org/whl/cpu"
-        cuda_tag = cuda_version.replace(".", "")
+        cuda_tag = self.pytorch_index_cuda(cuda_version)
         return f"https://download.pytorch.org/whl/cu{cuda_tag}"
     
     def create_run_script(self, use_sage: bool = True, fast_mode: bool = True) -> Path:
         """Create Windows batch script to run ComfyUI."""
-        script_path = self.base_path / "run_nvidia_gpu.bat"
+        script_path = self.get_run_script_path()
         
         # Build command arguments
         args = ["ComfyUI\\main.py", "--windows-standalone-build"]
@@ -1430,8 +1503,7 @@ class LinuxHandler(PlatformHandler):
                 self.logger.info("Existing venv appears invalid, recreating...")
                 # Only remove if we're confident it's broken
                 if self.interactive:
-                    response = input("Existing venv found but appears broken. Recreate? (y/N): ")
-                    if response.lower() != 'y':
+                    if not self._confirm("Existing venv found but appears broken. Recreate?"):
                         # Try to use it anyway
                         self.python_path = venv_python
                         self.environment_type = "venv"
@@ -1443,6 +1515,18 @@ class LinuxHandler(PlatformHandler):
                     # Non-interactive mode: recreate automatically
                     self.logger.info("Non-interactive mode: recreating invalid venv")
                     shutil.rmtree(self.venv_path)
+
+            if not self.may_create_env:
+                # Read-only operation -- report against system Python rather than
+                # building an environment the user did not ask for.
+                self.python_path = Path(sys.executable)
+                self.venv_path = None
+                self.environment_type = "system"
+                self.logger.info(
+                    "No virtual environment here; using system Python for this command "
+                    "(none created -- pass --install or --upgrade to create one)"
+                )
+                return
 
             self.logger.info("Creating Python virtual environment...")
             try:
@@ -1490,8 +1574,7 @@ class LinuxHandler(PlatformHandler):
             print("WARNING: Build tools already installed but --force specified")
             print("This may reinstall or upgrade existing build tools")
             if self.interactive:
-                response = input("Continue with forced installation? (y/N): ")
-                if response.lower() != 'y':
+                if not self._confirm("Continue with forced installation?"):
                     self.logger.info("Skipping build tools installation")
                     return True
         
@@ -1664,12 +1747,12 @@ class LinuxHandler(PlatformHandler):
         """Get PyTorch installation URL for Linux."""
         if cuda_version == "cpu":
             return "https://download.pytorch.org/whl/cpu"
-        cuda_tag = cuda_version.replace(".", "")
+        cuda_tag = self.pytorch_index_cuda(cuda_version)
         return f"https://download.pytorch.org/whl/cu{cuda_tag}"
     
     def create_run_script(self, use_sage: bool = True, fast_mode: bool = True) -> Path:
         """Create Linux shell script to run ComfyUI."""
-        script_path = self.base_path / "run_comfyui.sh"
+        script_path = self.get_run_script_path()
         
         # Build command arguments
         args = ["ComfyUI/main.py"]
@@ -1794,8 +1877,7 @@ class MacOSHandler(PlatformHandler):
                 self.logger.info("Existing venv appears invalid, recreating...")
                 # Only remove if we're confident it's broken
                 if self.interactive:
-                    response = input("Existing venv found but appears broken. Recreate? (y/N): ")
-                    if response.lower() != 'y':
+                    if not self._confirm("Existing venv found but appears broken. Recreate?"):
                         # Try to use it anyway
                         self.python_path = venv_python
                         self.environment_type = "venv"
@@ -1807,6 +1889,18 @@ class MacOSHandler(PlatformHandler):
                     # Non-interactive mode: recreate automatically
                     self.logger.info("Non-interactive mode: recreating invalid venv")
                     shutil.rmtree(self.venv_path)
+
+            if not self.may_create_env:
+                # Read-only operation -- report against system Python rather than
+                # building an environment the user did not ask for.
+                self.python_path = Path(sys.executable)
+                self.venv_path = None
+                self.environment_type = "system"
+                self.logger.info(
+                    "No virtual environment here; using system Python for this command "
+                    "(none created -- pass --install or --upgrade to create one)"
+                )
+                return
 
             self.logger.info("Creating Python virtual environment...")
             try:
@@ -1849,8 +1943,7 @@ class MacOSHandler(PlatformHandler):
             print("WARNING: Build tools already installed but --force specified")
             print("This may reinstall or upgrade existing build tools")
             if self.interactive:
-                response = input("Continue with forced installation? (y/N): ")
-                if response.lower() != 'y':
+                if not self._confirm("Continue with forced installation?"):
                     self.logger.info("Skipping build tools installation")
                     return True
         
@@ -1972,7 +2065,7 @@ class MacOSHandler(PlatformHandler):
     
     def create_run_script(self, use_sage: bool = True, fast_mode: bool = True) -> Path:
         """Create macOS shell script to run ComfyUI."""
-        script_path = self.base_path / "run_comfyui.sh"
+        script_path = self.get_run_script_path()
         
         # Build command arguments (SageAttention may not work on macOS without CUDA)
         args = ["ComfyUI/main.py"]
@@ -2055,11 +2148,24 @@ class ComfyUIInstaller:
         "132": "130",
     }
 
+    # Shown instead of a concrete target when PyTorch is being installed in the same
+    # run: Triton and SageAttention are matched against the torch version, and pip
+    # picks that at execution time from a live index. The plan genuinely cannot know
+    # it, so it names the condition rather than asserting a version install would
+    # contradict. See the "dryrun must never make a claim install contradicts"
+    # invariant in private/claude/CLAUDE_version_compat_section.md.
+    PENDING_TORCH_NOTE = "determined after PyTorch installs"
+
     def __init__(self, base_path: Optional[Path] = None, verbose: bool = False,
                  interactive: bool = True, force: bool = False, sage_version: str = "auto",
                  experimental: bool = False, upgrade: bool = False, with_custom_nodes: bool = False,
-                 python_specifier: Tuple[str, Optional[Path]] = ("auto", None)):
+                 python_specifier: Tuple[str, Optional[Path]] = ("auto", None),
+                 may_create_env: bool = True):
         self.base_path = base_path or Path.cwd()
+        # Whether this command is allowed to CREATE a Python environment. Only
+        # install/upgrade are; reporting and backup commands discover one but must
+        # not build one as a side effect of being asked a question.
+        self.may_create_env = may_create_env
         self.interactive = interactive
         self.force = force
         self.experimental = experimental
@@ -2072,6 +2178,12 @@ class ComfyUIInstaller:
         self.setup_logging(verbose)
         self.handler = self._create_platform_handler()
         self.installed_packages = []
+
+        # The InstallPlan for this run, set by install(). Initialized here so every
+        # consumer can test it directly; it was previously only assigned inside
+        # install(), so any other entry point (show_installed, cleanup, run) had to
+        # guard each access with hasattr() or raise AttributeError.
+        self._current_plan = None
         self.created_directories = []
         
     def setup_logging(self, verbose: bool):
@@ -2090,15 +2202,14 @@ class ComfyUIInstaller:
     def _create_platform_handler(self) -> PlatformHandler:
         """Create appropriate platform handler."""
         system = platform.system()
-        if system == "Windows":
-            return WindowsHandler(self.base_path, self.logger, self.interactive, self.force,
-                                  self.python_specifier)
-        elif system == "Linux":
-            return LinuxHandler(self.base_path, self.logger, self.interactive, self.force,
-                                self.python_specifier)
-        elif system == "Darwin":
-            return MacOSHandler(self.base_path, self.logger, self.interactive, self.force,
-                                self.python_specifier)
+        # Only install/upgrade may CREATE an environment. Reporting and backup
+        # commands still discover one, but must not build one as a side effect.
+        may_create = getattr(self, "may_create_env", True)
+        handlers = {"Windows": WindowsHandler, "Linux": LinuxHandler, "Darwin": MacOSHandler}
+        handler_cls = handlers.get(system)
+        if handler_cls is not None:
+            return handler_cls(self.base_path, self.logger, self.interactive, self.force,
+                               self.python_specifier, may_create_env=may_create)
         else:
             raise ComfyUIInstallerError(f"Unsupported platform: {system}")
     
@@ -2159,8 +2270,10 @@ class ComfyUIInstaller:
         venv_path = self.base_path / "venv"
         if venv_path.exists():
             if self.interactive:
-                response = input(f"Remove virtual environment at {venv_path}? This will delete ALL packages in it. (y/N): ")
-                should_remove = response.lower() == 'y'
+                should_remove = self._confirm(
+                    f"Remove virtual environment at {venv_path}? "
+                    f"This will delete ALL packages in it."
+                )
             else:
                 # Non-interactive mode: don't remove venv by default (safer)
                 should_remove = False
@@ -2197,10 +2310,17 @@ class ComfyUIInstaller:
         return cuda_version
     
     @staticmethod
-    def _parse_setuptools_constraint(raw_reqs: List[str]) -> str:
-        """Build a pip requirement for setuptools from installed packages' requirements.
+    def _parse_constraint(package: str, raw_reqs: List[str]) -> str:
+        """Build a pip requirement for `package` from installed packages' requirements.
+
+        This is discovered-metadata handling, NOT a curated compatibility table: what
+        installed distributions declare about `package` is authoritative, so an
+        unrecognized bound is respected rather than assumed compatible. Curated tables
+        (the PyTorch/Triton matrix) default the other way -- unknown means KEEP -- which
+        is why the two must not share machinery.
 
         Args:
+            package: Distribution name to build a requirement for, e.g. "setuptools".
             raw_reqs: Raw requirement strings declared by installed distributions,
                 e.g. ["setuptools<82", 'setuptools>=77.0.3; python_version < "3.12"'].
 
@@ -2215,7 +2335,14 @@ class ComfyUIInstaller:
             # installed, which we cannot determine here -- skip them.
             if "extra" in marker:
                 continue
-            match = re.match(r"^\s*setuptools\s*(.*)$", base, re.IGNORECASE)
+            # The name must END here. Without the boundary, "setuptools" also
+            # matches "setuptools_scm>=7" and "setuptools-rust>=1.5.2" -- real
+            # requirements seen in a live ComfyUI venv -- yielding a spec for a
+            # DIFFERENT package, or, combined with a genuine one, the malformed
+            # "setuptools>=70.0.0,_scm>=7". A trailing "[extras]" is still fine.
+            match = re.match(
+                rf"^\s*{re.escape(package)}(?![A-Za-z0-9._-])\s*(.*)$", base, re.IGNORECASE
+            )
             if not match:
                 continue
             # Drop any bracketed extras, e.g. "setuptools[core]>=70" -> ">=70"
@@ -2224,30 +2351,128 @@ class ComfyUIInstaller:
                 specs.append(spec)
 
         if not specs:
-            return "setuptools"
+            return package
         # pip accepts comma-joined specifiers, e.g. "setuptools<82,>=77.0.3"
-        return "setuptools" + ",".join(sorted(set(specs)))
+        return package + ",".join(sorted(set(specs)))
 
-    def _get_installed_setuptools_requirements(self) -> Optional[List[str]]:
-        """Query the target environment for setuptools requirements of installed packages.
+    def _get_installed_requirements(self, package: str) -> Optional[List[str]]:
+        """Query the target environment for `package` requirements of installed packages.
+
+        Args:
+            package: Distribution name to collect declared requirements for.
 
         Returns:
             List of raw requirement strings (possibly empty if nothing constrains
-            setuptools), or None if the query could not be run.
+            `package`), or None if the query could not be run.
         """
         code = (
             "import importlib.metadata as md;"
             "print('\\n'.join(r for d in md.distributions() "
-            "for r in (d.requires or []) if r.lower().startswith('setuptools')))"
+            f"for r in (d.requires or []) if r.lower().startswith({package.lower()!r})))"
         )
+        out = self._query_target_env(code)
+        if out is None:
+            # Distinguish "query failed" (None -> upgrade pip only) from "nothing
+            # constrains the package" ([] -> upgrade freely).
+            return None if not self._query_target_env("print('ok')") else []
+        return [line.strip() for line in out.splitlines() if line.strip()]
+
+    @staticmethod
+    def _explanatory_detail(details) -> bool:
+        """Is `details` prose worth showing, rather than a wheel-source marker?
+
+        ComponentAction.details carries two unrelated things: a wheel URL or the
+        literal "PyPI" (where the package comes from), and occasionally a note
+        explaining a choice the user did not make. Only the latter belongs in the
+        plan line -- otherwise a SageAttention downgrade renders as
+        "-> 1.0.6 - SA 1.x (~2.1x speedup, requested) (PyPI)", where the trailing
+        marker adds nothing and reads like a mistake.
+        """
+        if not details:
+            return False
+        text = str(details)
+        return not text.startswith("http") and text != "PyPI"
+
+    def _confirm(self, question: str, default_yes: bool = False) -> bool:
+        """Ask a yes/no question and return whether the user agreed.
+
+        Accepts "y"/"yes"/"n"/"no" in any case, and an empty answer takes the
+        default. Anything else is NOT read as agreement.
+
+        The default-yes prompts used to compare `response.lower() == 'n'`, so the
+        single most natural negative answer -- "no" -- did not match and the
+        destructive change went ahead anyway, printing "Success!". Found by
+        running the downgrade-consent prompt with piped input.
+
+        On EOF (no controlling terminal: cron, CI, a piped stdin that ran dry)
+        this returns False regardless of the default, and does not raise. A step
+        that needs consent must never proceed merely because nobody was present
+        to object.
+        """
+        suffix = "(Y/n)" if default_yes else "(y/N)"
         try:
-            result = self.handler.run_command(
-                [str(self.handler.python_path), "-c", code], capture_output=True
-            )
-            return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+            response = input(f"{question} {suffix}: ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print("\n  No response available - cancelling.")
+            return False
+
+        if not response:
+            return default_yes
+        if response in ("y", "yes"):
+            return True
+        if response in ("n", "no"):
+            return False
+        print(f"  Did not understand {response!r} - treating as 'no'.")
+        return False
+
+    def _constraint_satisfied(self, spec: str) -> bool:
+        """Does the target environment's installed version already satisfy `spec`?
+
+        `spec` is a pip requirement string such as "setuptools<82" or bare
+        "setuptools". Uncertainty resolves to True -- if we cannot evaluate the
+        constraint we report it as met, so the caller leaves the environment
+        alone rather than "fixing" something it does not understand.
+        """
+        match = re.match(r"^([A-Za-z0-9._-]+)(.*)$", spec.strip())
+        if not match:
+            return True
+        name, specifier = match.group(1), match.group(2).strip()
+        if not specifier:
+            return True  # unconstrained -- nothing to violate
+        installed = self._get_installed_version(name)
+        if not installed:
+            return True
+        try:
+            from packaging.specifiers import SpecifierSet
+            from packaging.version import Version
+            return Version(installed) in SpecifierSet(specifier)
         except Exception as e:
-            self.logger.debug(f"Could not query setuptools requirements: {e}")
-            return None
+            self.logger.debug(f"Could not evaluate {spec!r} against {installed!r}: {e}")
+            return True
+
+    def _build_tools_need_upgrade(self, plan: InstallPlan) -> bool:
+        """Decide whether install() should touch pip/setuptools.
+
+        pip and setuptools are build tooling: they matter because something is
+        about to be compiled or installed. When the plan changes nothing there is
+        nothing to build, so upgrading them can only put a working environment at
+        risk -- which is exactly what happened on a real run whose plan read
+        KEEP/KEEP/KEEP and which still replaced setuptools 82.0.1 with 83.0.0
+        without the preview mentioning it.
+
+        The one exception is the Issue #34 repair case: if setuptools currently
+        sits outside a bound its own installed packages declare, the environment
+        is already broken by pip's own reckoning and is worth correcting.
+        """
+        if self.force or plan.has_changes():
+            return True
+
+        raw_reqs = self._get_installed_requirements("setuptools")
+        if not raw_reqs:
+            # No declared constraints (or the query failed) and nothing to
+            # install -- leave it alone.
+            return False
+        return not self._constraint_satisfied(self._parse_constraint("setuptools", raw_reqs))
 
     def upgrade_pip_setuptools(self):
         """Upgrade pip, and setuptools within constraints declared by installed packages.
@@ -2263,11 +2488,20 @@ class ComfyUIInstaller:
         violating a constraint its own packages declare. We therefore discover those
         constraints first and upgrade only within them.
         """
+        # The plan decides this like every other mutation (see
+        # _build_tools_need_upgrade). Guarded with getattr so the non-install
+        # entry points, which never build a plan, keep working.
+        plan = getattr(self, "_current_plan", None)
+        if plan is not None and not plan.build_tools_upgrade_needed:
+            print("Build tools: pip/setuptools unchanged (nothing to install)", flush=True)
+            self.logger.info("Skipped pip/setuptools upgrade - plan has no changes")
+            return
+
         # flush so these lines land before pip's own (subprocess) output when
         # stdout is piped/redirected rather than attached to a terminal
         print("Upgrading pip and setuptools...", flush=True)
 
-        raw_reqs = self._get_installed_setuptools_requirements()
+        raw_reqs = self._get_installed_requirements("setuptools")
         if raw_reqs is None:
             # Discovery failed -- don't risk breaking a working environment by
             # upgrading setuptools blind. pip alone is safe.
@@ -2277,7 +2511,7 @@ class ComfyUIInstaller:
             self.handler.pip_install(["pip"], ["--upgrade"])
             return
 
-        setuptools_spec = self._parse_setuptools_constraint(raw_reqs)
+        setuptools_spec = self._parse_constraint("setuptools", raw_reqs)
         if setuptools_spec != "setuptools":
             print(f"  Respecting installed constraint: {setuptools_spec}", flush=True)
             self.logger.info(f"setuptools constrained by installed packages: {setuptools_spec}")
@@ -2311,8 +2545,7 @@ class ComfyUIInstaller:
                 print("WARNING: Compatible PyTorch already installed but --force specified")
                 print("This will reinstall PyTorch and may break existing installations")
                 if self.interactive:
-                    response = input("Continue with forced PyTorch installation? (y/N): ")
-                    if response.lower() != 'y':
+                    if not self._confirm("Continue with forced PyTorch installation?"):
                         print("Skipping PyTorch installation")
                         return
 
@@ -2337,8 +2570,7 @@ class ComfyUIInstaller:
                 print("WARNING: Compatible PyTorch already installed but --force specified")
                 print("This will reinstall PyTorch and may break existing installations")
                 if self.interactive:
-                    response = input("Continue with forced PyTorch installation? (y/N): ")
-                    if response.lower() != 'y':
+                    if not self._confirm("Continue with forced PyTorch installation?"):
                         print("Skipping PyTorch installation")
                         return
 
@@ -2508,8 +2740,7 @@ class ComfyUIInstaller:
             print("WARNING: Python development files already present but --force specified")
             print("This will redownload and overwrite existing files")
             if self.interactive:
-                response = input("Continue with forced download? (y/N): ")
-                if response.lower() != 'y':
+                if not self._confirm("Continue with forced download?"):
                     print("Skipping Python development files download")
                     return
         
@@ -2544,12 +2775,17 @@ class ComfyUIInstaller:
         # Check for essential library files
         if not libs_dir.exists():
             return False
-        
-        # Look for some .lib files (exact files may vary)
-        lib_files = list(libs_dir.glob("*.lib"))
-        if len(lib_files) < 5:  # Should have multiple .lib files
+
+        # A venv's libs/ holds exactly two files -- python3.lib and pythonXY.lib
+        # -- so the previous ">= 5 .lib files" threshold could NEVER be met there.
+        # The result was that every venv install re-downloaded and re-extracted
+        # the dev-files zip over the venv on every run, and the "already present"
+        # message was unreachable. Portable's python_embeded ships more .lib files,
+        # which is why it went unnoticed. What actually matters is the versioned
+        # import library the compiler links against.
+        if not list(libs_dir.glob("python*.lib")):
             return False
-        
+
         self.logger.debug("Python development files appear complete")
         return True
 
@@ -2558,10 +2794,48 @@ class ComfyUIInstaller:
         try:
             torch_ver = self._get_torch_version()
             cuda_ver = self._get_cuda_version_from_torch()
-            python_ver = f"{sys.version_info.major}.{sys.version_info.minor}"
+            # Report the TARGET env's Python, not the interpreter running us.
+            python_ver = ".".join(self._get_target_python_version().split(".")[:2])
             return f"PyTorch: {torch_ver}, CUDA: {cuda_ver}, Python: {python_ver}"
         except Exception:
             return "Could not detect versions"
+
+    def _query_target_env(self, code: str) -> Optional[str]:
+        """Run a Python snippet in the TARGET environment; return stripped stdout.
+
+        The single place that shells out to the target interpreter. Six helpers used
+        to carry their own copy of this boilerplate, each with a different idea of
+        what failure means.
+
+        Returns None when the query fails or produces nothing -- deliberately without
+        a fallback. Callers keep their own documented fallback so the choice stays
+        visible at the point where it matters (`or ""`, `or "128"`, ...) rather than
+        being buried in shared plumbing.
+        """
+        try:
+            result = self.handler.run_command(
+                [str(self.handler.python_path), "-c", code], capture_output=True
+            )
+            return (result.stdout or "").strip() or None
+        except Exception as e:
+            self.logger.debug(f"Target env query failed: {e}")
+            return None
+
+    def _get_installed_version(self, *packages: str) -> Optional[str]:
+        """Installed version of the first of `packages` present in the target env.
+
+        Takes several names because one component can ship under different
+        distribution names per platform (triton-windows on Windows, triton elsewhere)
+        -- making that fallback a first-class feature rather than a loop one caller
+        happens to implement.
+        """
+        for package in packages:
+            found = self._query_target_env(
+                f"from importlib.metadata import version; print(version({package!r}))"
+            )
+            if found:
+                return found
+        return None
 
     def _get_installed_sageattention_version(self) -> Optional[str]:
         """Get currently installed sageattention version, or None if not installed.
@@ -2569,14 +2843,7 @@ class ComfyUIInstaller:
         Returns:
             Version string (e.g., "1.0.6", "2.2.0+cu128torch2.7.1.post3") or None.
         """
-        try:
-            result = self.handler.run_command([
-                str(self.handler.python_path), "-c",
-                "from importlib.metadata import version; print(version('sageattention'))"
-            ], capture_output=True)
-            return result.stdout.strip() if result.stdout else None
-        except Exception:
-            return None
+        return self._get_installed_version("sageattention")
 
     def _get_installed_triton_version(self) -> Optional[str]:
         """Get currently installed triton/triton-windows version, or None if not installed.
@@ -2584,18 +2851,8 @@ class ComfyUIInstaller:
         Returns:
             Version string (e.g., "3.5.1.post22") or None.
         """
-        # Try triton-windows first (Windows), then triton (Linux/Mac)
-        for package in ["triton-windows", "triton"]:
-            try:
-                result = self.handler.run_command([
-                    str(self.handler.python_path), "-c",
-                    f"from importlib.metadata import version; print(version('{package}'))"
-                ], capture_output=True)
-                if result.stdout and result.stdout.strip():
-                    return result.stdout.strip()
-            except Exception:
-                continue
-        return None
+        # triton-windows first (Windows), then triton (Linux/Mac)
+        return self._get_installed_version("triton-windows", "triton")
 
     def _get_triton_version_constraint(self, torch_ver: str) -> str:
         """Get compatible triton-windows version constraint for PyTorch version.
@@ -2800,6 +3057,60 @@ class ComfyUIInstaller:
         spec = py_spec or "39"
         return f"cp{spec}", int(spec)
 
+    def _wheel_config_matches(self, config: Tuple, cuda_ver: str, torch_ver: str,
+                              python_ver: str, exact_version: Optional[str] = None,
+                              include_experimental: bool = False) -> bool:
+        """Does one `_get_wheel_configs()` row serve this environment?
+
+        THE single implementation of the wheel-matching predicate. It previously
+        existed as three hand-maintained copies -- in _find_matching_wheel (the plan
+        path), _get_available_sa2_versions (the availability report) and
+        _try_install_sageattention_v2 (the execution path). They agreed only because
+        someone kept them in sync by hand, which meant the wheel shown by --dryrun and
+        the wheel actually installed were produced by separately-maintained code.
+
+        Args:
+            config: an 8-tuple row from _get_wheel_configs()
+            cuda_ver: detected CUDA code, e.g. "130"
+            torch_ver: full torch version, e.g. "2.13.0"
+            python_ver: target-env python tag, e.g. "312"
+            exact_version: only match rows whose SA version starts with this
+            include_experimental: allow rows flagged experimental
+        """
+        sage_ver, cuda_whl, torch_pattern, py_spec, _tag, is_abi3, is_experimental, _tfv = config
+
+        if is_experimental and not include_experimental:
+            return False
+        if exact_version and not sage_ver.startswith(exact_version):
+            return False
+
+        # CUDA: exact, or a tested minor-version alias (e.g. 129 -> 128)
+        if not self._cuda_matches(cuda_whl, cuda_ver):
+            return False
+
+        # PyTorch: a 3-part pattern ("2.7.0") is exact; 2-part ("2.7") is major.minor
+        if torch_pattern.count(".") == 2:
+            if torch_ver != torch_pattern:
+                return False
+        else:
+            parts = str(torch_ver).split(".")
+            torch_major_minor = f"{parts[0]}.{parts[1]}" if len(parts) >= 2 else str(torch_ver)
+            if torch_major_minor != torch_pattern:
+                return False
+
+        # Python: ABI3 rows have a floor (cp39/cp310); per-Python rows need an exact tag
+        if is_abi3:
+            _, py_floor = self._abi3_cp(py_spec)
+            try:
+                if int(python_ver) < py_floor:
+                    return False
+            except (TypeError, ValueError):
+                return False
+        elif py_spec != python_ver:
+            return False
+
+        return True
+
     def _get_wheel_configs(self) -> List[Tuple]:
         """Get the list of known wheel configurations.
 
@@ -2893,40 +3204,13 @@ class ComfyUIInstaller:
 
         wheel_configs = self._get_wheel_configs()
 
-        # Extract torch major.minor for pattern matching
-        torch_parts = torch_ver.split(".")
-        torch_major_minor = f"{torch_parts[0]}.{torch_parts[1]}" if len(torch_parts) >= 2 else torch_ver
-        py_int = int(python_ver)
-
-        for sage_ver, cuda_whl, torch_pattern, py_spec, tag, is_abi3, is_experimental, torch_filename_ver in wheel_configs:
-            # Skip experimental unless requested
-            if is_experimental and not include_experimental:
+        for config in wheel_configs:
+            if not self._wheel_config_matches(config, cuda_ver, torch_ver, python_ver,
+                                              exact_version, include_experimental):
                 continue
 
-            # Skip if exact version requested and this isn't it
-            if exact_version and not sage_ver.startswith(exact_version):
-                continue
-
-            # CUDA must match (exact, or a tested minor-version alias)
-            if not self._cuda_matches(cuda_whl, cuda_ver):
-                continue
-
-            # PyTorch matching
-            if "." in torch_pattern and torch_pattern.count(".") == 2:
-                if torch_ver != torch_pattern:
-                    continue
-            else:
-                if torch_major_minor != torch_pattern:
-                    continue
-
-            # Python matching
-            if is_abi3:
-                _, py_floor = self._abi3_cp(py_spec)
-                if py_int < py_floor:
-                    continue
-            else:
-                if py_spec != python_ver:
-                    continue
+            (sage_ver, cuda_whl, torch_pattern, py_spec, tag,
+             is_abi3, is_experimental, torch_filename_ver) = config
 
             # Found a match - build wheel URL
             wheel_url = self._build_wheel_url(sage_ver, cuda_whl, torch_pattern,
@@ -2966,14 +3250,13 @@ class ComfyUIInstaller:
             return {}
 
         wheel_configs = self._get_wheel_configs()
-        torch_parts = torch_ver.split(".")
-        torch_major_minor = f"{torch_parts[0]}.{torch_parts[1]}" if len(torch_parts) >= 2 else torch_ver
-        py_int = int(python_ver)
 
         # Collect info about each SA version
         version_info = {}
 
-        for sage_ver, cuda_whl, torch_pattern, py_spec, tag, is_abi3, is_experimental, torch_filename_ver in wheel_configs:
+        for config in wheel_configs:
+            (sage_ver, cuda_whl, torch_pattern, py_spec, tag,
+             is_abi3, is_experimental, torch_filename_ver) = config
             if is_experimental and not include_experimental:
                 continue
 
@@ -2991,22 +3274,10 @@ class ComfyUIInstaller:
             version_info[sage_ver]["pytorch_patterns"].add(torch_pattern)
             version_info[sage_ver]["cuda_versions"].add(cuda_whl)
 
-            # Check if this specific config matches (exact CUDA or tested alias)
-            cuda_ok = self._cuda_matches(cuda_whl, cuda_ver)
-            torch_ok = False
-            if "." in torch_pattern and torch_pattern.count(".") == 2:
-                torch_ok = (torch_ver == torch_pattern)
-            else:
-                torch_ok = (torch_major_minor == torch_pattern)
-
-            python_ok = False
-            if is_abi3:
-                _, py_floor = self._abi3_cp(py_spec)
-                python_ok = (py_int >= py_floor)
-            else:
-                python_ok = (py_spec == python_ver)
-
-            if cuda_ok and torch_ok and python_ok:
+            # Same predicate the plan and execution use -- see _wheel_config_matches.
+            # (include_experimental is already applied by the `continue` above.)
+            if self._wheel_config_matches(config, cuda_ver, torch_ver, python_ver,
+                                          include_experimental=True):
                 version_info[sage_ver]["compatible"] = True
 
         # Add human-readable info
@@ -3044,7 +3315,7 @@ class ComfyUIInstaller:
         try:
             torch_ver = self._get_torch_version()
             cuda_ver = self._get_cuda_version_from_torch()
-            python_ver = f"{sys.version_info.major}{sys.version_info.minor}"
+            python_ver = self._target_python_tag()   # target env, not the invoker (D10)
         except Exception as e:
             self.logger.debug(f"Could not detect environment: {e}")
             return True, "", []  # Can't check, let install attempt proceed
@@ -3105,7 +3376,7 @@ class ComfyUIInstaller:
                 torch_ver = self._get_torch_version()
             if cuda_ver is None:
                 cuda_ver = self._get_cuda_version_from_torch()
-            python_ver = f"{sys.version_info.major}{sys.version_info.minor}"
+            python_ver = self._target_python_tag()   # target env, not the invoker (D10)
 
             match = self._find_matching_wheel(cuda_ver, torch_ver, python_ver,
                                               include_experimental=self.experimental)
@@ -3140,6 +3411,23 @@ class ComfyUIInstaller:
                 'fallback': 'SA 1.0.6',
                 'message': f"Could not determine compatibility: {e}"
             }
+
+    def _target_python_tag(self) -> str:
+        """Python tag for the TARGET environment, e.g. "312" -- the form wheel
+        matching compares against.
+
+        Wheel selection used to read `sys.version_info` inline, i.e. the interpreter
+        that happens to be *running the installer*. Invoke it with system Python 3.13
+        against a Portable env on 3.12 and per-Python wheels matched on the wrong
+        version, and the cp310-abi3 floor for post5/post6 was evaluated against the
+        wrong interpreter too (D10).
+        """
+        parts = self._get_target_python_version().split(".")
+        if len(parts) >= 2 and parts[0].isdigit() and parts[1].isdigit():
+            return f"{parts[0]}{parts[1]}"
+        # Unparseable target version: fall back to the invoking interpreter rather
+        # than returning something that matches nothing.
+        return f"{sys.version_info.major}{sys.version_info.minor}"
 
     def _get_target_python_version(self) -> str:
         """Get Python version from the target environment (not the invoking interpreter)."""
@@ -3239,12 +3527,33 @@ class ComfyUIInstaller:
 
         if not state.torch_version:
             target_cuda = state.nvcc_cuda or "cpu"
+            reason, note = "PyTorch not installed", None
+            if target_cuda == "cpu":
+                target_display = ">=2.5.0 (CPU)"
+            else:
+                # Show the index we will actually install from. When the detected
+                # CUDA's index is incomplete we fall back to a lower one, and the
+                # preview must say so rather than advertise a CUDA we won't use.
+                index_cuda = PlatformHandler.pytorch_index_cuda(target_cuda)
+                target_display = (
+                    f">=2.5.0 (CUDA {self._format_cuda_version(index_cuda)})"
+                )
+                if index_cuda != target_cuda.replace(".", ""):
+                    # Carried in details, not reason: the renderer prints details
+                    # for INSTALL, and a substitution the user did not ask for
+                    # must be visible rather than silently applied.
+                    note = (
+                        f"CUDA {target_cuda} wheels are incomplete upstream "
+                        f"(no torchaudio) - using "
+                        f"{self._format_cuda_version(index_cuda)} builds"
+                    )
             return ComponentAction(
                 component="PyTorch",
                 action="INSTALL",
                 current_version=None,
-                target_version=f">=2.5.0 (CUDA {target_cuda})" if target_cuda != "cpu" else ">=2.5.0 (CPU)",
-                reason="PyTorch not installed"
+                target_version=target_display,
+                reason=reason,
+                details=note
             )
 
         # Check if PyTorch 1.x (needs upgrade)
@@ -3287,7 +3596,8 @@ class ComfyUIInstaller:
             reason="CPU mode"
         )
 
-    def _plan_triton_action(self, state: EnvironmentState, torch_version: Optional[str]) -> ComponentAction:
+    def _plan_triton_action(self, state: EnvironmentState, torch_version: Optional[str],
+                            torch_pending: bool = False) -> ComponentAction:
         """Determine what action to take for Triton.
 
         Rules (future-proof):
@@ -3301,6 +3611,24 @@ class ComfyUIInstaller:
         triton_package = "triton-windows" if sys.platform == "win32" else "triton"
         constraint = self._get_triton_version_constraint(torch_version) if torch_version else None
 
+        # --force must reach every component. install_triton() consults the plan and
+        # returns early on KEEP, so without this branch `--install --force` was a
+        # silent no-op for Triton (D5, shipped in v0.8.6).
+        if self.force and state.triton_version:
+            return ComponentAction(
+                component="Triton",
+                action="REINSTALL",
+                current_version=state.triton_version,
+                target_version=triton_package,
+                reason="Force mode enabled",
+                details=f"constraint: {constraint}" if constraint else None
+            )
+
+        # PyTorch is being installed in this same run, so the constraint execution
+        # will apply is derived from a torch version that does not exist yet. Say so
+        # rather than advertising an unconstrained install (D8).
+        pending_note = self.PENDING_TORCH_NOTE if torch_pending else None
+
         if not state.triton_version:
             return ComponentAction(
                 component="Triton",
@@ -3308,7 +3636,8 @@ class ComfyUIInstaller:
                 current_version=None,
                 target_version=triton_package,
                 reason="Triton not installed",
-                details=f"constraint: {constraint}" if constraint else None
+                details=(f"constraint: {constraint}" if constraint
+                         else (f"constraint {pending_note}" if pending_note else None))
             )
 
         # Check compatibility if we have a PyTorch version
@@ -3335,13 +3664,17 @@ class ComfyUIInstaller:
                 # incompatible version (e.g., Triton 3.6 with PyTorch 2.7)
                 upgrade_ok = True
                 if constraint and new_version:
-                    from packaging.version import Version
-                    from packaging.specifiers import SpecifierSet
                     try:
+                        # Imported inside the try: `packaging` is not a declared
+                        # runtime dependency, and a ComfyUI Portable embedded
+                        # Python may not have it. An ImportError here would
+                        # otherwise propagate out of plan_installation().
+                        from packaging.version import Version
+                        from packaging.specifiers import SpecifierSet
                         if not Version(new_version) in SpecifierSet(constraint):
                             upgrade_ok = False
                     except Exception:
-                        pass  # If we can't parse, don't block the upgrade
+                        pass  # Can't import or can't parse: don't block the upgrade
 
                 if upgrade_ok:
                     return ComponentAction(
@@ -3361,8 +3694,40 @@ class ComfyUIInstaller:
             reason="Compatible with PyTorch"
         )
 
+    def _sa_is_downgrade(self, installed: Optional[str], target: Optional[str]) -> bool:
+        """Whether moving from `installed` to `target` lowers the SageAttention version.
+
+        Installed versions carry a local segment (e.g. "2.2.0+cu130torch2.10.0andhigher.post6")
+        that PEP 440 orders *after* the plain release, so compare release parts only.
+
+        The fallback compares the full release tuple, NOT just the major number.
+        This return value gates the DOWNGRADE branch of `_plan_sageattention_action`,
+        so a missed downgrade does not merely skip a warning -- it drops the user's
+        explicit `--sage-version` request entirely, in the plan and therefore in
+        execution too. A major-only fallback made 2.2.0.post6 -> 2.1.1 look like no
+        change at all, so the request was silently ignored and the run still
+        reported success. That fired whenever the interpreter *launching* the
+        installer lacked `packaging`, which is not exotic: it is an optional
+        dependency this project deliberately does not require.
+        """
+        if not installed or not target or installed == "-":
+            return False
+        try:
+            from packaging.version import Version
+            return Version(str(installed).split("+")[0]) > Version(str(target).split("+")[0])
+        except Exception:
+            def release_tuple(value):
+                match = re.match(r"^(\d+(?:\.\d+)*)", str(value).split("+")[0].strip())
+                return tuple(int(p) for p in match.group(1).split(".")) if match else ()
+
+            cur, tgt = release_tuple(installed), release_tuple(target)
+            if cur and tgt:
+                return cur > tgt
+            return False
+
     def _plan_sageattention_action(self, state: EnvironmentState, cuda_for_wheels: str,
-                                    torch_version: Optional[str]) -> ComponentAction:
+                                    torch_version: Optional[str],
+                                    torch_pending: bool = False) -> ComponentAction:
         """Determine what action to take for SageAttention.
 
         Rules (future-proof):
@@ -3371,7 +3736,9 @@ class ComfyUIInstaller:
         3. SA installed and --upgrade → check for updates
         4. SA installed (unknown version) → KEEP (don't touch user's install)
 
-        Key principle: Never downgrade user's SA. If they have SA 3.x, keep it.
+        Key principle: Never downgrade a user's SA *silently*. An explicit
+        --sage-version request may lower it, but that is planned as a DOWNGRADE so
+        has_destructive_changes() surfaces a confirmation prompt first.
         """
         torch_ver_short = torch_version.split("+")[0] if torch_version else ""
 
@@ -3382,7 +3749,7 @@ class ComfyUIInstaller:
             cuda_ver=cuda_for_wheels
         )
 
-        # Determine target version
+        # Determine target version (auto selection)
         if compat['compatible']:
             target_version = compat['match']['sage_version']
             target_type = "SA 2.x (~3x speedup)"
@@ -3392,8 +3759,59 @@ class ComfyUIInstaller:
             target_type = "SA 1.x (~2.1x speedup)"
             wheel_url = "PyPI"
 
+        # --- Honor an explicit --sage-version request (docstring rule 2) ----------
+        # clone_and_install_repositories() dispatches on sage_version_major/exact, so
+        # a plan that ignores the request predicts something install contradicts:
+        # `--sage-version 1` used to preview "Nothing to do" and then downgrade a
+        # working SA 2.x install (D1).
+        requested = self.sage_version_exact or (
+            str(self.sage_version_major) if self.sage_version_major else None
+        )
+        if self.sage_version_exact:
+            target_version = self.sage_version_exact
+            target_type = f"SA {self.sage_version_exact} (requested)"
+            # Availability is resolved at execution; don't promise a URL we haven't matched.
+            wheel_url = None
+        elif self.sage_version_major == 1:
+            target_version = "1.0.6"
+            target_type = "SA 1.x (~2.1x speedup, requested)"
+            wheel_url = "PyPI"
+        elif self.sage_version_major == 2 and not compat['compatible']:
+            # Requested 2.x but no wheel matches this environment -- execution fails
+            # loudly via _fail_sageattention_v2 rather than falling back to 1.x.
+            target_version = "2.x"
+            target_type = "SA 2.x (requested; no matching wheel for this environment)"
+            wheel_url = None
+
+        # --force must reach every component; without this the plan says KEEP and
+        # clone_and_install_repositories() honors it, making `--install --force` a
+        # silent no-op for SageAttention (D5).
+        if self.force and state.sageattention_version:
+            return ComponentAction(
+                component="SageAttention",
+                action="REINSTALL",
+                current_version=state.sageattention_version,
+                target_version=f"{target_version} - {target_type}",
+                reason="Force mode enabled",
+                details=wheel_url
+            )
+
         # Not installed → INSTALL
         if not state.sageattention_version:
+            if torch_pending:
+                # PyTorch lands before SageAttention in install(), so the wheel match
+                # above was computed against a torch that isn't there yet. Execution
+                # will re-derive it and can legitimately reach a different answer --
+                # typically a 2.x wheel where this said 1.0.6. Don't assert a version
+                # install would contradict; name the condition instead (D2).
+                return ComponentAction(
+                    component="SageAttention",
+                    action="INSTALL",
+                    current_version=None,
+                    target_version=self.PENDING_TORCH_NOTE,
+                    reason="SageAttention not installed",
+                    details=None
+                )
             return ComponentAction(
                 component="SageAttention",
                 action="INSTALL",
@@ -3407,8 +3825,11 @@ class ComfyUIInstaller:
         current_major = self._parse_sageattention_major_version(state.sageattention_version)
 
         # If user has a version newer than what we know about → KEEP
-        # (They may have manually installed a newer version)
-        if current_major and current_major > 2:
+        # (They may have manually installed a newer version.)
+        # Only in auto mode: an explicit request must not be silently ignored here
+        # while execution honors it -- a user on SA 3.x asking for --sage-version 2
+        # was shown KEEP and then downgraded (D6).
+        if requested is None and current_major and current_major > 2:
             return ComponentAction(
                 component="SageAttention",
                 action="KEEP",
@@ -3425,6 +3846,20 @@ class ComfyUIInstaller:
                 current_version=state.sageattention_version,
                 target_version=None,
                 reason="Already at target version"
+            )
+
+        # An explicit request that lowers the installed version is a real downgrade.
+        # Emitting "DOWNGRADE" (rather than KEEP or a bare UPGRADE) makes
+        # has_destructive_changes() recommend a backup and prompt for confirmation
+        # before anything is removed.
+        if requested is not None and self._sa_is_downgrade(state.sageattention_version, target_version):
+            return ComponentAction(
+                component="SageAttention",
+                action="DOWNGRADE",
+                current_version=state.sageattention_version,
+                target_version=f"{target_version} - {target_type}",
+                reason=f"--sage-version {self.sage_version_raw} requested",
+                details=wheel_url
             )
 
         # --upgrade mode
@@ -3481,10 +3916,24 @@ class ComfyUIInstaller:
             cuda_for_wheels=cuda_for_wheels
         )
 
-        # Plan actions for each component
-        plan.actions.append(self._plan_pytorch_action(state, cuda_for_wheels))
-        plan.actions.append(self._plan_triton_action(state, torch_version))
-        plan.actions.append(self._plan_sageattention_action(state, cuda_for_wheels, torch_version))
+        # Plan actions for each component.
+        #
+        # Order matters: install() installs PyTorch BEFORE Triton and SageAttention,
+        # so when PyTorch is itself being installed the version those two are matched
+        # against does not exist yet -- pip picks it at execution time from a live
+        # index. Claiming a specific Triton constraint or SA wheel here would be a
+        # prediction install can contradict. We pass that fact down so they can say
+        # so honestly instead. (Defects D2/D8.)
+        pytorch_action = self._plan_pytorch_action(state, cuda_for_wheels)
+        torch_pending = (not state.torch_version) and pytorch_action.action in (
+            "INSTALL", "UPGRADE", "REINSTALL"
+        )
+
+        plan.actions.append(pytorch_action)
+        plan.actions.append(self._plan_triton_action(state, torch_version, torch_pending))
+        plan.actions.append(
+            self._plan_sageattention_action(state, cuda_for_wheels, torch_version, torch_pending)
+        )
 
         # Add custom nodes if requested
         if self.with_custom_nodes:
@@ -3496,21 +3945,79 @@ class ComfyUIInstaller:
                     reason=node.get("description", "Custom node")
                 ))
 
-        # Check SA wheel availability for display
-        torch_ver_short = torch_version.split("+")[0] if torch_version else ""
-        compat = self.check_compatibility(
-            torch_ver=torch_ver_short,
-            cuda_ver=cuda_for_wheels
-        )
-        plan.sa_wheel_available = compat['compatible']
-        if compat['compatible'] and compat.get('match'):
-            plan.sa_wheel_url = compat['match'].get('wheel_url')
+        # Check SA wheel availability for display.
+        # When PyTorch is itself part of this run, the answer depends on the version
+        # pip resolves at execution time -- probing now would report the SA 1.x
+        # fallback and be contradicted by the install. Say "unknown" instead.
+        if torch_pending:
+            plan.sa_wheel_available = None
+            plan.sa_wheel_note = (
+                "Selected after PyTorch installs -- the matching wheel depends on "
+                "the PyTorch version pip resolves for CUDA "
+                f"{self._format_cuda_version(PlatformHandler.pytorch_index_cuda(cuda_for_wheels))}."
+            )
+        else:
+            torch_ver_short = torch_version.split("+")[0] if torch_version else ""
+            compat = self.check_compatibility(
+                torch_ver=torch_ver_short,
+                cuda_ver=cuda_for_wheels
+            )
+            plan.sa_wheel_available = compat['compatible']
+            if compat['compatible'] and compat.get('match'):
+                plan.sa_wheel_url = compat['match'].get('wheel_url')
+
+            # check_compatibility() only ever computes the AUTO target, so on an
+            # explicit --sage-version it names a wheel the install will not fetch
+            # (e.g. showing the installed post6 URL while the plan downgrades to
+            # 2.1.1). The planner already recorded what it actually chose in the
+            # action's details -- prefer that.
+            sa_action = plan.get_action("SageAttention")
+            requested = self.sage_version_exact or (
+                str(self.sage_version_major) if self.sage_version_major else None
+            )
+            if sa_action is not None and requested is not None:
+                planned = sa_action.details
+                if planned and str(planned).startswith("http"):
+                    plan.sa_wheel_url = planned
+                    plan.sa_wheel_available = True
+                elif planned == "PyPI":
+                    # SA 1.x ships no pre-built wheel -- it comes from PyPI. Note
+                    # this is a deliberate choice, not a gap in our wheel table:
+                    # warning "no 2.x wheel for your environment" would be false
+                    # here, since one exists and the user declined it.
+                    plan.sa_wheel_url = None
+                    plan.sa_wheel_available = False
+                    plan.sa_wheel_note = (
+                        f"SA 1.x requested -- installing {sa_action.target_version.split(' ')[0]} "
+                        f"from PyPI (SA 1.x has no pre-built wheel)."
+                    )
+                elif sa_action.action != "KEEP":
+                    # An exact request the planner deliberately left open
+                    # ("availability is resolved at execution"). Asserting either
+                    # a URL or the 1.x fallback here would be a claim install
+                    # contradicts -- name the condition instead.
+                    plan.sa_wheel_url = None
+                    plan.sa_wheel_available = None
+                    plan.sa_wheel_note = (
+                        f"SA {requested} requested -- the installer resolves "
+                        f"availability for this environment during install."
+                    )
+
+        # Decide the pip/setuptools upgrade here rather than in execution, so the
+        # preview can predict it like every other change.
+        plan.build_tools_upgrade_needed = self._build_tools_need_upgrade(plan)
+        if plan.build_tools_upgrade_needed and not plan.has_changes():
+            plan.warnings.append(
+                "setuptools is outside a bound declared by installed packages and "
+                "will be corrected, even though no components change."
+            )
 
         # Recommend backup if destructive changes planned
         plan.backup_recommended = plan.has_destructive_changes()
 
-        # Add warnings
-        if not plan.sa_wheel_available:
+        # Add warnings. A note means the outcome was the user's explicit choice,
+        # so "no wheel for your environment" would be false -- don't warn.
+        if plan.sa_wheel_available is False and not plan.sa_wheel_note:
             cuda_display = self._format_cuda_version(cuda_for_wheels)
             plan.warnings.append(
                 f"No SA 2.x wheel for CUDA {cuda_display} + PyTorch {torch_version or 'N/A'} + Python {state.python_version}. "
@@ -3557,6 +4064,12 @@ class ComfyUIInstaller:
                 detail = f"{action.current_version} (already installed)"
             elif action.action == "INSTALL":
                 detail = action.target_version or "latest"
+                # An INSTALL can still involve a choice the user did not make --
+                # e.g. substituting a CUDA index whose wheels are complete. Only
+                # non-URL details are explanatory; SageAttention stores its wheel
+                # URL here and that is already shown in Wheel Details below.
+                if self._explanatory_detail(action.details):
+                    detail += f" ({action.details})"
             else:
                 detail = f"{action.current_version} -> {action.target_version}"
                 if action.reason:
@@ -3569,8 +4082,13 @@ class ComfyUIInstaller:
         print("-" * 70)
         print("Wheel Details:")
         print("-" * 70)
-        if plan.sa_wheel_available:
+        if plan.sa_wheel_available is None:
+            print(f"  {plan.sa_wheel_note or 'Resolved during installation.'}")
+        elif plan.sa_wheel_available:
             print(f"  SageAttention wheel: {plan.sa_wheel_url}")
+        elif plan.sa_wheel_note:
+            # A deliberate choice (the user asked for 1.x), not a gap in coverage.
+            print(f"  {plan.sa_wheel_note}")
         else:
             print(f"  No SA 2.x wheel available for:")
             print(f"    CUDA {self._format_cuda_version(plan.cuda_for_wheels)} + "
@@ -3671,16 +4189,30 @@ class ComfyUIInstaller:
 
         # Now print clean output (all INFO logs are above this)
         print()  # Blank line to separate from any INFO logs
-        print("=" * 67)
+        # Size the columns to their content. SageAttention's local version part
+        # ("2.2.0+cu130torch2.9.0andhigher.post4" -- 36 chars) overran the fixed
+        # 28-char column and pushed the right border past the rules above and
+        # below it. The historical widths are kept as MINIMUMS, so a short-content
+        # table renders exactly as it always did and the box only grows when a
+        # value would otherwise break the border.
+        headers = ("Component", "Version", "Status")
+        min_widths = (15, 28, 14)
+        rows = [(name, str(d["version"]), str(d["status"])) for name, d in info.items()]
+        widths = [
+            max([floor, len(head)] + [len(row[i]) for row in rows])
+            for i, (head, floor) in enumerate(zip(headers, min_widths))
+        ]
+        # "| " + col + " | " + col + " | " + col + " |"  ->  4 separators + 6 pad
+        table_width = sum(widths) + 10
+
+        print("=" * table_width)
         print("Current Installation")
-        print("=" * 67)
-        print(f"| {'Component':<15} | {'Version':<28} | {'Status':<14} |")
-        print("|" + "-" * 17 + "|" + "-" * 30 + "|" + "-" * 16 + "|")
-        for component, data in info.items():
-            version = data["version"]
-            status = data["status"]
-            print(f"| {component:<15} | {version:<28} | {status:<14} |")
-        print("=" * 67)
+        print("=" * table_width)
+        print(f"| {headers[0]:<{widths[0]}} | {headers[1]:<{widths[1]}} | {headers[2]:<{widths[2]}} |")
+        print("|" + "|".join("-" * (w + 2) for w in widths) + "|")
+        for component, version, status in rows:
+            print(f"| {component:<{widths[0]}} | {version:<{widths[1]}} | {status:<{widths[2]}} |")
+        print("=" * table_width)
         print(f"{script_name} version: {__version__}")
         env_type_display = self.handler.environment_type.capitalize()
         if self.handler.environment_type == "portable":
@@ -3886,56 +4418,52 @@ class ComfyUIInstaller:
         try:
             torch_ver = self._get_torch_version()
             cuda_ver = self._get_cuda_version_from_torch()
-            python_ver = f"{sys.version_info.major}{sys.version_info.minor}"
+            python_ver = self._target_python_tag()   # target env, not the invoker (D10)
 
-            print(f"  Detected: PyTorch {torch_ver}, CUDA {cuda_ver}, Python {sys.version_info.major}.{sys.version_info.minor}")
+            py_display = ".".join(self._get_target_python_version().split(".")[:2])
+            print(f"  Detected: PyTorch {torch_ver}, CUDA {cuda_ver}, Python {py_display}")
 
             if exact_version:
                 print(f"  Looking for exact version: {exact_version}")
             else:
                 print("  Checking for compatible pre-built wheel...")
 
+            # Prefer the wheel the plan already computed and displayed. Re-deriving it
+            # here is what let --dryrun and --install disagree: the plan stores the URL
+            # in ComponentAction.details, and execution used to ignore it and run its
+            # own copy of the matching loop.
+            planned_url = None
+            if self._current_plan:
+                sa_action = self._current_plan.get_action("SageAttention")
+                if sa_action and sa_action.details and str(sa_action.details).startswith("http"):
+                    planned_url = sa_action.details
+
+            if planned_url:
+                try:
+                    self.logger.info(f"Installing the planned wheel: {planned_url}")
+                    self.handler.pip_install([planned_url])
+                    self.installed_packages.append("sageattention")
+                    print()
+                    print("  " + "-" * 50)
+                    print(f"  [OK] Installed SageAttention {planned_url.rsplit('/', 1)[-1]}")
+                    print("       -> ~3x faster than FlashAttention2")
+                    print("  " + "-" * 50)
+                    return True
+                except Exception as e:
+                    # Fall through to matching below; the plan may have been computed
+                    # against a torch that install_pytorch has since replaced.
+                    self.logger.debug(f"Planned wheel failed, re-deriving: {e}")
+
             # Use centralized wheel configurations
             wheel_configs = self._get_wheel_configs()
 
-            # Extract user's torch major.minor for pattern matching
-            torch_parts = torch_ver.split(".")
-            torch_major_minor = f"{torch_parts[0]}.{torch_parts[1]}" if len(torch_parts) >= 2 else torch_ver
-            py_int = int(python_ver)  # e.g., "312" -> 312
-
-            for sage_ver, cuda_whl, torch_pattern, py_spec, tag, is_abi3, is_experimental, torch_filename_ver in wheel_configs:
-                # Skip experimental unless --experimental flag is set
-                if is_experimental and not self.experimental:
+            for config in wheel_configs:
+                if not self._wheel_config_matches(config, cuda_ver, torch_ver, python_ver,
+                                                  exact_version, self.experimental):
                     continue
 
-                # Skip if exact version requested and this isn't it
-                if exact_version and not sage_ver.startswith(exact_version):
-                    continue
-
-                # CUDA must match (exact, or a tested minor-version alias)
-                if not self._cuda_matches(cuda_whl, cuda_ver):
-                    continue
-
-                # PyTorch matching: pattern "2.7" matches "2.7.0", "2.7.1", etc.
-                if "." in torch_pattern and torch_pattern.count(".") == 2:
-                    # Exact version like "2.7.0" - must match exactly
-                    if torch_ver != torch_pattern:
-                        continue
-                else:
-                    # Pattern like "2.7" - match major.minor
-                    if torch_major_minor != torch_pattern:
-                        continue
-
-                # Python matching
-                if is_abi3:
-                    # ABI3 wheels work with Python >= their cp floor (cp39 or cp310)
-                    _, py_floor = self._abi3_cp(py_spec)
-                    if py_int < py_floor:
-                        continue
-                else:
-                    # Exact Python version required
-                    if py_spec != python_ver:
-                        continue
+                (sage_ver, cuda_whl, torch_pattern, py_spec, tag,
+                 is_abi3, is_experimental, torch_filename_ver) = config
 
                 # Build the wheel URL based on wheel type
                 wheel_url = self._build_wheel_url(sage_ver, cuda_whl, torch_pattern, torch_ver,
@@ -4060,8 +4588,12 @@ class ComfyUIInstaller:
         print("=" * 60)
         print(f"  Requested: --sage-version {self.sage_version_raw}")
 
-        # Consult the plan (single source of truth for install decisions)
-        if self.upgrade and hasattr(self, '_current_plan') and self._current_plan:
+        # Consult the plan (single source of truth for install decisions).
+        # This deliberately is NOT gated on self.upgrade: a plain `--install` that
+        # plans KEEP must also skip, or the plan is ignored and SageAttention is
+        # reinstalled over a perfectly good copy (D3). --force is honored because
+        # the planner now emits REINSTALL for it rather than KEEP (D5).
+        if hasattr(self, '_current_plan') and self._current_plan:
             sa_action = self._current_plan.get_action("SageAttention")
             if sa_action and sa_action.action == "KEEP":
                 print(f"  Already at target version ({sa_action.current_version})")
@@ -4166,8 +4698,7 @@ class ComfyUIInstaller:
                 print(f"WARNING: {repo_name} repository exists but --force specified")
                 print(f"This will delete existing repository and re-clone fresh copy")
                 if self.interactive:
-                    response = input(f"Delete and re-clone {repo_name}? (y/N): ")
-                    if response.lower() != 'y':
+                    if not self._confirm(f"Delete and re-clone {repo_name}?"):
                         print(f"Using existing {repo_name} repository")
                         return True
                 # Force mode: delete and re-clone
@@ -4208,130 +4739,46 @@ class ComfyUIInstaller:
             self.logger.error(f"Failed to clone {repo_name}: {e}")
             return False
     
-    def _compare_versions(self, current: str, proposed: str) -> int:
-        """Compare two version strings.
-
-        Returns:
-            -1 if current < proposed (upgrade)
-             0 if current == proposed (no change)
-             1 if current > proposed (DOWNGRADE)
-        """
-        if not current or current == "-" or not proposed or proposed == "-":
-            return 0
-
-        def parse_version(v: str) -> List[int]:
-            # Strip +suffix (e.g., "2.9.1+cu130" -> "2.9.1")
-            base = v.split('+')[0]
-            # Handle .postN suffix (e.g., "3.5.1.post23" -> [3, 5, 1, 23])
-            parts = base.replace('.post', '.').split('.')
-            return [int(p) for p in parts if p.isdigit()]
-
-        try:
-            curr_parts = parse_version(current)
-            prop_parts = parse_version(proposed)
-
-            # Compare each component
-            for c, p in zip(curr_parts, prop_parts):
-                if c < p:
-                    return -1  # upgrade
-                if c > p:
-                    return 1   # DOWNGRADE
-
-            # If all compared parts equal, longer version is "greater"
-            if len(curr_parts) < len(prop_parts):
-                return -1
-            if len(curr_parts) > len(prop_parts):
-                return 1
-
-            return 0
-        except (ValueError, AttributeError):
-            return 0
-
-    def _detect_downgrades(self, proposed_torch: Optional[str] = None,
-                           proposed_triton: Optional[str] = None) -> List[Tuple[str, str, str]]:
-        """Detect if proposed changes would result in version downgrades.
-
-        Returns:
-            List of (component, current_version, proposed_version) tuples for downgrades.
-        """
-        downgrades = []
-
-        # Get current versions
-        current_torch = self._get_torch_version()
-        current_triton = self._get_installed_triton_version()
-
-        # Check PyTorch
-        if proposed_torch and current_torch and current_torch != "-":
-            if self._compare_versions(current_torch, proposed_torch) > 0:
-                downgrades.append(("PyTorch", current_torch, proposed_torch))
-
-        # Check Triton
-        if proposed_triton and current_triton and current_triton != "-":
-            if self._compare_versions(current_triton, proposed_triton) > 0:
-                downgrades.append(("Triton", current_triton, proposed_triton))
-
-        return downgrades
-
-    def _confirm_downgrade(self, downgrades: List[Tuple[str, str, str]]) -> bool:
-        """Prompt user to confirm downgrades.
-
-        Args:
-            downgrades: List of (component, current, proposed) tuples
-
-        Returns:
-            True if user confirms, False to abort.
-        """
-        if not downgrades:
-            return True
-
-        print()
-        print("=" * 60)
-        print("⚠️  DOWNGRADE DETECTED")
-        print("=" * 60)
-        print()
-        print("The following components will be downgraded:")
-        for component, current, proposed in downgrades:
-            print(f"  {component}: {current} → {proposed}")
-        print()
-        print("This may break your existing ComfyUI setup.")
-        print()
-        print("Tip: Use --backup to create a backup before proceeding.")
-        print("     See --help for backup options.")
-        print()
-
-        if not self.interactive:
-            print("Non-interactive mode: aborting to prevent unintended downgrade.")
-            print("Use --force to override this safety check.")
-            return False
-
-        response = input("Proceed with downgrade? [y/N]: ").strip().lower()
-        return response == 'y'
 
     def _get_torch_version(self) -> str:
         """Get installed PyTorch version."""
-        try:
-            result = self.handler.run_command([
-                str(self.handler.python_path), "-c",
-                "import torch; print(torch.__version__.split('+')[0])"
-            ], capture_output=True)
-            return result.stdout.strip()
-        except Exception:
-            return ""  # Return empty if not installed
+        # "" (not None) on failure: callers pass this straight into
+        # _get_triton_version_constraint() / _check_triton_pytorch_compatibility(),
+        # which parse "" safely but raise AttributeError on None.
+        return self._query_target_env(
+            "import torch; print(torch.__version__.split('+')[0])"
+        ) or ""
     
     def _get_cuda_version_from_torch(self) -> str:
         """Get CUDA version from PyTorch."""
-        try:
-            result = self.handler.run_command([
-                str(self.handler.python_path), "-c",
-                "import torch; print(torch.version.cuda.replace('.', '') if torch.cuda.is_available() else 'cpu')"
-            ], capture_output=True)
-            return result.stdout.strip()
-        except Exception:
-            return "128"  # Default to CUDA 12.8
+        # NOTE: the "128" fallback is a pre-existing wart -- if torch cannot be
+        # imported we report CUDA 12.8 rather than admitting we do not know, which
+        # can select a wheel for the wrong CUDA. Preserved here deliberately so this
+        # consolidation stays a no-behavior-change refactor; changing it is its own
+        # decision with its own test.
+        return self._query_target_env(
+            "import torch; print(torch.version.cuda.replace('.', '') "
+            "if torch.cuda.is_available() else 'cpu')"
+        ) or "128"
     
     def create_run_script(self, cuda_version: str):
-        """Create platform-appropriate run script (matches run_nvidia_gpu.bat functionality)."""
+        """Create platform-appropriate run script (matches run_nvidia_gpu.bat functionality).
+
+        Skipped when the run changed nothing and a script is already there. The
+        file is a plain launcher that users routinely edit (extra flags, a
+        different port, custom model paths), and rewriting it from template on an
+        install that installed nothing silently discards those edits.
+        """
         use_sage = cuda_version != "cpu"  # Only use SageAttention if CUDA is available
+
+        plan = getattr(self, "_current_plan", None)
+        if plan is not None and not plan.has_changes() and not self.force:
+            existing = self.handler.get_run_script_path()
+            if existing.exists():
+                print(f"Run script: keeping existing {existing.name} (nothing changed)")
+                self.logger.info(f"Preserved existing run script: {existing}")
+                return existing
+
         script_path = self.handler.create_run_script(use_sage=use_sage, fast_mode=True)
         return script_path
     
@@ -4386,6 +4833,10 @@ class ComfyUIInstaller:
             version_info = action.current_version or "not installed"
             if action.target_version and action.action != "KEEP":
                 version_info = f"{version_info} -> {action.target_version}"
+            # Keep in step with _display_plan(): a substitution the user did not
+            # ask for must be visible in the real run too, not only in --dryrun.
+            if action.action != "KEEP" and self._explanatory_detail(action.details):
+                version_info += f" ({action.details})"
             print(f"  {action.component:<15} {status:<12} {version_info}")
         print()
 
@@ -4398,8 +4849,7 @@ class ComfyUIInstaller:
             print("-" * 70)
             print()
             if self.interactive:
-                response = input("Continue with installation? (Y/n): ")
-                if response.lower() == 'n':
+                if not self._confirm("Continue with installation?", default_yes=True):
                     print("Installation cancelled.")
                     return False
             print()
@@ -4415,8 +4865,7 @@ class ComfyUIInstaller:
             print("   - Reinstall build tools and development packages")
             print()
             if self.interactive:
-                response = input("Are you sure you want to continue with force mode? (y/N): ")
-                if response.lower() != 'y':
+                if not self._confirm("Are you sure you want to continue with force mode?"):
                     print("Installation cancelled.")
                     return False
             else:
@@ -4437,8 +4886,7 @@ class ComfyUIInstaller:
                 print("Use --sage-version auto (without --experimental) to revert to stable.")
                 print()
                 if self.interactive:
-                    response = input("Continue with experimental mode? (y/N): ")
-                    if response.lower() != 'y':
+                    if not self._confirm("Continue with experimental mode?"):
                         print("Installation cancelled.")
                         return False
                 else:
@@ -4458,8 +4906,22 @@ class ComfyUIInstaller:
             self.install_build_tools()
             
             # Step 2: Detect CUDA
-            cuda_version = self.detect_and_setup_cuda()
-            
+            #
+            # Use the CUDA the PLAN matched wheels against, not a second independent
+            # probe. detect_and_setup_cuda() reads nvcc only, while the plan uses
+            # _get_cuda_for_wheels() (torch's CUDA first, nvcc as fallback). With
+            # torch on cu128 and system nvcc on 13.0 those disagree, so execution
+            # would install PyTorch from a different CUDA index than the one the
+            # displayed SageAttention wheel was matched for (D7).
+            detected_cuda = self.detect_and_setup_cuda()
+            if self._current_plan and self._current_plan.cuda_for_wheels:
+                cuda_version = self._current_plan.cuda_for_wheels
+                if cuda_version != detected_cuda.replace(".", ""):
+                    print(f"  Using CUDA {self._format_cuda_version(cuda_version)} "
+                          f"(from the installation plan) for PyTorch")
+            else:
+                cuda_version = detected_cuda
+
             # Step 3: Upgrade pip/setuptools
             self.upgrade_pip_setuptools()
             
@@ -4483,8 +4945,9 @@ class ComfyUIInstaller:
                     print("The rest of ComfyUI will still work, but without SageAttention acceleration.")
                     
                     if self.interactive:
-                        response = input("\nContinue installation without SageAttention? (Y/n): ")
-                        if response.lower() == 'n':
+                        print()
+                        if not self._confirm("Continue installation without SageAttention?",
+                                             default_yes=True):
                             raise
                     else:
                         print("Non-interactive mode: continuing without SageAttention...")
@@ -4840,6 +5303,12 @@ Examples:
     except ValueError as e:
         parser.error(str(e))
 
+    # Only install/upgrade may CREATE a Python environment. Asking about backups
+    # or printing what is installed must never build a venv as a side effect --
+    # running `--backup-clean` from a non-ComfyUI directory used to create one
+    # before reporting "No backups found".
+    may_create_env = bool(install_requested or upgrade_requested or args.run)
+
     # Create installer instance
     installer = ComfyUIInstaller(
         base_path=base_path,
@@ -4850,7 +5319,8 @@ Examples:
         experimental=args.experimental,
         upgrade=upgrade_requested,
         with_custom_nodes=args.with_custom_nodes,
-        python_specifier=python_specifier
+        python_specifier=python_specifier,
+        may_create_env=may_create_env
     )
 
     # Handle backup commands

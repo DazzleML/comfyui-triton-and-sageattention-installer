@@ -64,7 +64,7 @@ PARSE_MATRIX = [
 )
 def test_parse_setuptools_constraint(name, raw_reqs, expected):
     """Requirement strings from installed packages combine into one pip spec."""
-    result = ComfyUIInstaller._parse_setuptools_constraint(raw_reqs)
+    result = ComfyUIInstaller._parse_constraint("setuptools", raw_reqs)
     assert result == expected, f"{name}: expected {expected!r}, got {result!r}"
 
 
@@ -75,7 +75,7 @@ class TestUpgradePipSetuptools:
         inst = ComfyUIInstaller.__new__(ComfyUIInstaller)
         inst.logger = Mock()
         inst.handler = Mock()
-        inst._get_installed_setuptools_requirements = Mock(return_value=raw_reqs)
+        inst._get_installed_requirements = Mock(return_value=raw_reqs)
         return inst
 
     def test_constrained_upgrade_passes_bound_to_pip(self):
@@ -112,3 +112,38 @@ class TestUpgradePipSetuptools:
         packages = inst.handler.pip_install.call_args[0][0]
         assert "setuptools" not in packages, "bare (unbounded) setuptools was requested"
         assert "setuptools<82" in packages
+
+
+# ---------------------------------------------------------------------------
+# Package-name boundary — found in a live ComfyUI venv (v0.8.12)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("name,raw_reqs,expected", [
+    ("setuptools_scm is a different package",
+     ["setuptools_scm>=7"], "setuptools"),
+    ("setuptools-rust is a different package",
+     ["setuptools-rust>=1.5.2"], "setuptools"),
+    ("genuine constraint kept, impostor dropped",
+     ["setuptools>=70.0.0", "setuptools_scm>=7"], "setuptools>=70.0.0"),
+    ("impostor must not corrupt a real upper bound",
+     ["setuptools<82", "setuptools-rust>=1.5.2"], "setuptools<82"),
+    ("bracketed extras still parse",
+     ["setuptools[core]>=70"], "setuptools>=70"),
+])
+def test_constraint_matches_whole_package_name_only(name, raw_reqs, expected):
+    """A prefix match must not capture a longer, different distribution name.
+
+    Without a name boundary, "setuptools" also matched "setuptools_scm>=7" and
+    "setuptools-rust>=1.5.2" -- both real requirements in a live ComfyUI venv.
+    That produced a requirement for the WRONG package, or, combined with a
+    genuine one, the malformed "setuptools>=70.0.0,_scm>=7" which pip rejects.
+    """
+    assert ComfyUIInstaller._parse_constraint("setuptools", raw_reqs) == expected, name
+
+
+def test_parse_constraint_is_reusable_for_other_packages():
+    """The parser takes the package name, so it is not setuptools-specific."""
+    assert ComfyUIInstaller._parse_constraint("numpy", ["numpy<2.3.0", "numpy>=2.0.0"]) == \
+        "numpy<2.3.0,>=2.0.0"
+    # ...and the same boundary rule applies to any package it is pointed at.
+    assert ComfyUIInstaller._parse_constraint("numpy", ["numpy-financial>=1.0"]) == "numpy"

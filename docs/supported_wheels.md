@@ -71,6 +71,18 @@ PyTorch publishes some CUDA minor versions that SageAttention does not build a d
 
 Only verified aliases are enabled; any other CUDA-minor gap still falls back to SA 1.0.6 until individually tested. The gap detector (`tests/one-offs/detect_cuda_wheel_gaps.py`) re-checks PyTorch vs SageAttention CUDA coverage on demand.
 
+## PyTorch Index Substitutions
+
+Separate from the wheel aliases above, one PyTorch *download index* is incomplete and gets redirected:
+
+| Detected CUDA | Index used | Reason |
+|---------------|-----------|--------|
+| 13.2 (`cu132`) | `cu130` | The cu132 index publishes no `torchaudio` wheel on any platform. Because the installer requests torch, torchvision and torchaudio together, pip failed the whole command and a fresh install could not complete. Tested end-to-end on RTX 5090 (CUDA 13.2): torch 2.13.0+cu130 + torchaudio 2.11.0+cu130 + SA 2.2.0.post6, cosine 0.99933 vs SDPA. |
+
+This is deliberately **not** the same table as the wheel aliases, and the two already disagree: CUDA 12.9 uses the `cu128` SageAttention wheel, but the cu129 PyTorch index is complete and is **not** redirected. Only add an entry with measured evidence for that specific index, and remove it once upstream publishes the missing wheels.
+
+Note this only applies when PyTorch is not already installed. Once it is, its own CUDA version takes priority over what `nvcc` reports.
+
 ---
 
 ## SageAttention 1.0.6 (Fallback)

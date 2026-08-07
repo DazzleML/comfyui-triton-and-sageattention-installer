@@ -50,8 +50,12 @@ def mock_installer():
         installer.experimental = False
         installer.with_custom_nodes = False
         installer.sage_version_raw = "auto"
+        # NOTE: the real class sets `sage_version_exact` (see __init__:
+        # `self.sage_version_major, self.sage_version_exact = parse_sage_version(...)`).
+        # This fixture previously set a phantom `sage_version_specific`, which went
+        # unnoticed only because the plan layer never read the request (defect D1).
         installer.sage_version_major = None
-        installer.sage_version_specific = None
+        installer.sage_version_exact = None
 
         # Logger
         installer.logger = Mock()
@@ -138,8 +142,16 @@ def setup_mock_packages(installer, triton_version=None, sa_version=None):
             else:
                 raise Exception("Package not found")
 
-        # Default - return empty
-        return Mock(stdout="", returncode=0)
+        # No permissive default: this mock dispatches on command *substring*, so if
+        # the emitted command text ever changes shape (different -c payload, argv
+        # parameterization, distributions() instead of version(), ...) the branches
+        # above stop firing. A permissive `Mock(stdout="")` would silently turn every
+        # query into "nothing installed" -- tests would keep passing while exercising
+        # the opposite of what they claim. Fail loudly instead.
+        raise AssertionError(
+            f"unmocked env query in setup_package_mocks: {cmd_str}\n"
+            "Add a branch above, or update the existing substring match."
+        )
 
     # Only set side_effect if not already set for torch
     if installer.handler.run_command.side_effect is None:
