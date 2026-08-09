@@ -43,7 +43,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 # Version information
-__version__ = "0.8.12"
+__version__ = "0.8.13"
 
 
 def parse_sage_version(version_str: str) -> Tuple[Optional[int], Optional[str]]:
@@ -898,12 +898,60 @@ To clean up this backup after successful install:
         return f"{size_mb:.1f} MB"
 
 
+class ConfirmMixin:
+    """Shared yes/no prompting for both class hierarchies.
+
+    ComfyUIInstaller and PlatformHandler are SIBLINGS -- the installer HAS-A
+    handler, it is not one -- so a method defined on either is invisible to the
+    other. v0.8.12 routed all 14 prompts through self._confirm() but defined it
+    only on ComfyUIInstaller, so the five call sites inside the handlers raised
+    `AttributeError: 'WindowsHandler' object has no attribute '_confirm'`. That
+    fired on Windows for `--install --force` whenever Build Tools were already
+    present, meaning the confirmation gate it was meant to add never once ran.
+
+    A mixin rather than a module-level function so the call sites stay
+    `self._confirm(...)` and cannot drift apart again.
+    """
+
+    def _confirm(self, question: str, default_yes: bool = False) -> bool:
+        """Ask a yes/no question and return whether the user agreed.
+
+        Accepts "y"/"yes"/"n"/"no" in any case, and an empty answer takes the
+        default. Anything else is NOT read as agreement.
+
+        The default-yes prompts used to compare `response.lower() == 'n'`, so the
+        single most natural negative answer -- "no" -- did not match and the
+        destructive change went ahead anyway, printing "Success!". Found by
+        running the downgrade-consent prompt with piped input.
+
+        On EOF (no controlling terminal: cron, CI, a piped stdin that ran dry)
+        this returns False regardless of the default, and does not raise. A step
+        that needs consent must never proceed merely because nobody was present
+        to object.
+        """
+        suffix = "(Y/n)" if default_yes else "(y/N)"
+        try:
+            response = input(f"{question} {suffix}: ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print("\n  No response available - cancelling.")
+            return False
+
+        if not response:
+            return default_yes
+        if response in ("y", "yes"):
+            return True
+        if response in ("n", "no"):
+            return False
+        print(f"  Did not understand {response!r} - treating as 'no'.")
+        return False
+
+
 class ComfyUIInstallerError(Exception):
     """Base exception for installer errors."""
     pass
 
 
-class PlatformHandler(ABC):
+class PlatformHandler(ConfirmMixin, ABC):
     """Abstract base class for platform-specific installation handlers."""
 
     # PyTorch wheel indexes that are incomplete, mapped to the nearest complete one.
@@ -1003,6 +1051,17 @@ class PlatformHandler(ABC):
                     check=check,
                     capture_output=True,
                     text=True,
+                    # Decode explicitly. Without these, Python uses the PARENT's
+                    # locale codepage (cp1252 on German Windows), while native
+                    # tools like nvcc/cl/nmake emit the OEM console codepage
+                    # (cp850). Byte 0x81 is 'u-umlaut' in cp850 and undefined in
+                    # cp1252, so a single umlaut in a tool's output crashed the
+                    # whole install with UnicodeDecodeError (Issue #36). No one
+                    # encoding is right for both -- the Python children we parse
+                    # emit UTF-8 because of the env below -- so decode as UTF-8
+                    # and never raise. We only regex ASCII out of this.
+                    encoding="utf-8",
+                    errors="replace",
                     shell=shell,
                     env={**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"}
                 )
@@ -1012,6 +1071,8 @@ class PlatformHandler(ABC):
                     cmd,
                     check=check,
                     text=True,
+                    encoding="utf-8",       # see the note above (Issue #36)
+                    errors="replace",
                     shell=shell,
                     env={**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"}
                 )
@@ -1224,7 +1285,11 @@ class WindowsHandler(PlatformHandler):
             # Check if it's a reasonable Python version
             if "Python 3." in result.stdout:
                 return True
-        except (ComfyUIInstallerError, FileNotFoundError):
+        except Exception:
+            # A probe answers "no", it does not raise. Narrower excepts here are
+            # how Issue #36 escalated: an unexpected exception type inside a
+            # subprocess probe escaped and took the whole install down instead of
+            # being read as "this environment is not usable".
             pass
         return False
     
@@ -1500,21 +1565,27 @@ class LinuxHandler(PlatformHandler):
         else:
             # Create or recreate virtual environment
             if self.venv_path.exists():
-                self.logger.info("Existing venv appears invalid, recreating...")
-                # Only remove if we're confident it's broken
-                if self.interactive:
-                    if not self._confirm("Existing venv found but appears broken. Recreate?"):
-                        # Try to use it anyway
-                        self.python_path = venv_python
-                        self.environment_type = "venv"
-                        self.logger.warning("Using potentially invalid virtual environment")
-                        return
-                    else:
-                        shutil.rmtree(self.venv_path)
-                else:
-                    # Non-interactive mode: recreate automatically
-                    self.logger.info("Non-interactive mode: recreating invalid venv")
-                    shutil.rmtree(self.venv_path)
+                # An existing venv is left ALONE, always. The only evidence that
+                # it is "invalid" is one `python --version` probe, which fails for
+                # plenty of reasons that have nothing to do with the venv being
+                # broken -- a transient antivirus lock, a machine under load, any
+                # unexpected exception inside the probe. Acting on that by
+                # deleting (or even renaming) someone's whole environment is far
+                # too confident for the evidence, so we use it and say so.
+                #
+                # Previously this deleted the venv outright, and in
+                # --non-interactive mode with no confirmation at all.
+                print(f"  Existing venv at {self.venv_path} did not respond to a "
+                      f"version check.")
+                print(f"  Using it anyway and leaving it untouched. If it really is "
+                      f"broken, remove or")
+                print(f"  rename it yourself, or pass --python, then re-run.")
+                self.logger.warning(
+                    f"Venv failed validation but is being left in place: {self.venv_path}"
+                )
+                self.python_path = venv_python
+                self.environment_type = "venv"
+                return
 
             if not self.may_create_env:
                 # Read-only operation -- report against system Python rather than
@@ -1559,7 +1630,11 @@ class LinuxHandler(PlatformHandler):
             # Check if it's a reasonable Python version
             if "Python 3." in result.stdout:
                 return True
-        except (ComfyUIInstallerError, FileNotFoundError):
+        except Exception:
+            # A probe answers "no", it does not raise. Narrower excepts here are
+            # how Issue #36 escalated: an unexpected exception type inside a
+            # subprocess probe escaped and took the whole install down instead of
+            # being read as "this environment is not usable".
             pass
         return False
 
@@ -1874,21 +1949,27 @@ class MacOSHandler(PlatformHandler):
         else:
             # Create or recreate virtual environment
             if self.venv_path.exists():
-                self.logger.info("Existing venv appears invalid, recreating...")
-                # Only remove if we're confident it's broken
-                if self.interactive:
-                    if not self._confirm("Existing venv found but appears broken. Recreate?"):
-                        # Try to use it anyway
-                        self.python_path = venv_python
-                        self.environment_type = "venv"
-                        self.logger.warning("Using potentially invalid virtual environment")
-                        return
-                    else:
-                        shutil.rmtree(self.venv_path)
-                else:
-                    # Non-interactive mode: recreate automatically
-                    self.logger.info("Non-interactive mode: recreating invalid venv")
-                    shutil.rmtree(self.venv_path)
+                # An existing venv is left ALONE, always. The only evidence that
+                # it is "invalid" is one `python --version` probe, which fails for
+                # plenty of reasons that have nothing to do with the venv being
+                # broken -- a transient antivirus lock, a machine under load, any
+                # unexpected exception inside the probe. Acting on that by
+                # deleting (or even renaming) someone's whole environment is far
+                # too confident for the evidence, so we use it and say so.
+                #
+                # Previously this deleted the venv outright, and in
+                # --non-interactive mode with no confirmation at all.
+                print(f"  Existing venv at {self.venv_path} did not respond to a "
+                      f"version check.")
+                print(f"  Using it anyway and leaving it untouched. If it really is "
+                      f"broken, remove or")
+                print(f"  rename it yourself, or pass --python, then re-run.")
+                self.logger.warning(
+                    f"Venv failed validation but is being left in place: {self.venv_path}"
+                )
+                self.python_path = venv_python
+                self.environment_type = "venv"
+                return
 
             if not self.may_create_env:
                 # Read-only operation -- report against system Python rather than
@@ -1928,7 +2009,11 @@ class MacOSHandler(PlatformHandler):
             # Check if it's a reasonable Python version
             if "Python 3." in result.stdout:
                 return True
-        except (ComfyUIInstallerError, FileNotFoundError):
+        except Exception:
+            # A probe answers "no", it does not raise. Narrower excepts here are
+            # how Issue #36 escalated: an unexpected exception type inside a
+            # subprocess probe escaped and took the whole install down instead of
+            # being read as "this environment is not usable".
             pass
         return False
     
@@ -2083,7 +2168,7 @@ class MacOSHandler(PlatformHandler):
         return script_path
 
 
-class ComfyUIInstaller:
+class ComfyUIInstaller(ConfirmMixin):
     """Main installer class that orchestrates the installation process."""
     
     REPOSITORIES = {
@@ -2178,6 +2263,9 @@ class ComfyUIInstaller:
         self.setup_logging(verbose)
         self.handler = self._create_platform_handler()
         self.installed_packages = []
+        # {name: version} for packages this run deliberately uninstalled, so a
+        # failure can put them back. Only the CPU->CUDA switch populates this.
+        self._restore_on_failure = {}
 
         # The InstallPlan for this run, set by install(). Initialized here so every
         # consumer can test it directly; it was previously only assigned inside
@@ -2213,13 +2301,133 @@ class ComfyUIInstaller:
         else:
             raise ComfyUIInstallerError(f"Unsupported platform: {system}")
     
+    @staticmethod
+    def _index_url_for_version(version: str) -> Optional[str]:
+        """Infer which PyTorch index a pinned version came from.
+
+        Torch builds carry their variant in the local part: "2.5.1+cpu" is from
+        the CPU index, "2.9.1+cu130" from cu130. A bare "2.5.1" came from PyPI
+        and needs no index. Getting this wrong on a restore would reinstall the
+        wrong build, so an unrecognised shape returns None rather than guessing.
+        """
+        if not version or "+" not in version:
+            return None
+        local = version.split("+", 1)[1]
+        if local == "cpu":
+            return "https://download.pytorch.org/whl/cpu"
+        if re.fullmatch(r"cu\d+", local):
+            return f"https://download.pytorch.org/whl/{local}"
+        return None
+
+    def _record_for_restore(self, *packages: str):
+        """Snapshot installed versions before deliberately uninstalling them.
+
+        Only used where the installer removes working packages on purpose (the
+        CPU->CUDA switch). Anything recorded here is reinstalled by
+        _rollback_failed_install() if the run then fails.
+        """
+        for name in packages:
+            version = self._get_installed_version(name)
+            if version:
+                self._restore_on_failure[name] = version
+                self.logger.info(f"Recorded for restore: {name}=={version}")
+
+    def _restore_removed_packages(self):
+        """Put back packages this run deliberately uninstalled, after a failure."""
+        if not self._restore_on_failure:
+            return
+
+        pins = [f"{n}=={v}" for n, v in sorted(self._restore_on_failure.items())]
+        print(f"Restoring packages this run removed: {', '.join(pins)}")
+        self.logger.info(f"Restoring after failure: {pins}")
+
+        # All three come from the same index; infer it from any pinned version.
+        index_url = next(
+            (u for u in (self._index_url_for_version(v)
+                         for v in self._restore_on_failure.values()) if u), None
+        )
+        extra_args = ["--index-url", index_url] if index_url else []
+
+        try:
+            self.handler.pip_install(pins, extra_args)
+            print("  Restored.")
+            self.logger.info("Restore succeeded")
+            self._restore_on_failure = {}
+            return
+        except Exception as e:
+            self.logger.warning(f"Restore failed: {e}")
+
+        # Never leave the user guessing about packages we removed on purpose.
+        print()
+        print("  WARNING: could not reinstall the packages listed above.")
+        print("  This environment currently has no PyTorch. To restore manually:")
+        idx = f" --index-url {index_url}" if index_url else ""
+        print(f"    \"{self.handler.python_path}\" -m pip install{idx} {' '.join(pins)}")
+        print("  Or restore a backup:  --backup list  then  --backup-restore <n>")
+
+    def _rollback_failed_install(self):
+        """Undo ONLY what this run installed, after an install failure.
+
+        This is deliberately NOT cleanup_installation(). The two answer different
+        questions: "undo the mess I just made" versus "tear down ComfyUI's GPU
+        stack because the user asked". Sharing one implementation meant a failure
+        uninstalled a hardcoded list -- torch, torchvision, torchaudio, triton,
+        triton-windows, sageattention -- regardless of whether this run had
+        installed any of them.
+
+        That is Issue #36. A German Windows box crashed on a UnicodeDecodeError
+        before installing anything, and the handler "cleaned up" by removing the
+        user's working PyTorch and Triton. self.installed_packages had recorded
+        the truth (nothing) the whole time and was never consulted.
+
+        Scope is now exactly what this run recorded installing, so the worst case
+        is undoing our own work. Nothing installed means nothing removed.
+        """
+        if not self.installed_packages:
+            print("Nothing to roll back - this run installed no packages.")
+            self.logger.info("Rollback skipped: installed_packages is empty")
+        else:
+            packages = sorted(set(self.installed_packages))
+            print(f"Rolling back packages installed by this run: {', '.join(packages)}")
+            self.logger.info(f"Rolling back this run's installs: {packages}")
+            try:
+                self.handler.pip_uninstall(packages)
+            except Exception as e:
+                self.logger.warning(f"Some packages could not be rolled back: {e}")
+
+        # Undoing our own installs is only half of it. Where the run deliberately
+        # removed the user's working packages (the CPU->CUDA switch), put those
+        # back too -- otherwise a failed upgrade leaves no PyTorch at all.
+        self._restore_removed_packages()
+
     def cleanup_installation(self):
-        """Remove installed packages and created directories (matches Step 1 batch script)."""
+        """Remove ComfyUI's GPU stack and build artifacts (explicit --cleanup).
+
+        User-invoked teardown, so the scope is the known package set rather than
+        this run's installs. That makes it destructive by design -- it removes
+        PyTorch -- so unlike the failure path it asks first, and declines in
+        non-interactive mode rather than assuming consent.
+        """
         self.logger.info("Starting cleanup process...")
-        
+
+        print("The following packages will be UNINSTALLED:")
+        for pkg in self.TRITON_PACKAGES:
+            print(f"    {pkg}")
+        print("  This includes PyTorch. Anything else in this environment that")
+        print("  depends on it will stop working.")
+
+        if self.interactive:
+            if not self._confirm("Remove these packages?"):
+                print("Cleanup cancelled - no packages removed.")
+                self.logger.info("Cleanup declined by user")
+                return
+        else:
+            print("Non-interactive mode: skipping package removal "
+                  "(re-run without --non-interactive to confirm).")
+            self.logger.info("Cleanup skipped: non-interactive, no consent given")
+            return
+
         print("Uninstalling Triton dependency...")
-        
-        # Uninstall packages (exact match to batch script) - but only ComfyUI-specific ones
         try:
             self.handler.pip_uninstall(self.TRITON_PACKAGES)
         except Exception as e:
@@ -2393,38 +2601,6 @@ class ComfyUIInstaller:
         text = str(details)
         return not text.startswith("http") and text != "PyPI"
 
-    def _confirm(self, question: str, default_yes: bool = False) -> bool:
-        """Ask a yes/no question and return whether the user agreed.
-
-        Accepts "y"/"yes"/"n"/"no" in any case, and an empty answer takes the
-        default. Anything else is NOT read as agreement.
-
-        The default-yes prompts used to compare `response.lower() == 'n'`, so the
-        single most natural negative answer -- "no" -- did not match and the
-        destructive change went ahead anyway, printing "Success!". Found by
-        running the downgrade-consent prompt with piped input.
-
-        On EOF (no controlling terminal: cron, CI, a piped stdin that ran dry)
-        this returns False regardless of the default, and does not raise. A step
-        that needs consent must never proceed merely because nobody was present
-        to object.
-        """
-        suffix = "(Y/n)" if default_yes else "(y/N)"
-        try:
-            response = input(f"{question} {suffix}: ").strip().lower()
-        except (EOFError, KeyboardInterrupt):
-            print("\n  No response available - cancelling.")
-            return False
-
-        if not response:
-            return default_yes
-        if response in ("y", "yes"):
-            return True
-        if response in ("n", "no"):
-            return False
-        print(f"  Did not understand {response!r} - treating as 'no'.")
-        return False
-
     def _constraint_satisfied(self, spec: str) -> bool:
         """Does the target environment's installed version already satisfy `spec`?
 
@@ -2554,6 +2730,12 @@ class ComfyUIInstaller:
             if action.action == "UPGRADE" and "CPU-only" in action.reason:
                 print("Switching PyTorch from CPU to CUDA...")
                 print("  Removing existing CPU-only installation first...")
+                # Record exactly what we are about to remove BEFORE removing it.
+                # This is the one place the installer deliberately deletes working
+                # packages, so it is the one place a failed install can leave the
+                # user with no PyTorch at all. Capturing versions here lets
+                # _rollback_failed_install() put them back.
+                self._record_for_restore("torch", "torchvision", "torchaudio")
                 # Uninstall torch stack - pip won't switch CPU->CUDA otherwise
                 self.handler.run_command([
                     str(self.handler.python_path), "-m", "pip", "uninstall", "-y",
@@ -4968,10 +5150,46 @@ class ComfyUIInstaller:
             self.logger.info("Installation completed!")
             return True
             
+        except KeyboardInterrupt:
+            # Ctrl-C is a BaseException, so it bypasses the `except Exception`
+            # below and skips rollback entirely. We deliberately do NO pip work
+            # here: the user just pressed stop, recovery would take minutes, and
+            # the second Ctrl-C they would certainly press could abort it halfway
+            # and leave things worse. Instead, say plainly what state the
+            # environment is in -- which is all the interrupted run owes them.
+            print()
+            print("Interrupted.")
+            if self._restore_on_failure:
+                pins = [f"{n}=={v}" for n, v in sorted(self._restore_on_failure.items())]
+                index_url = next(
+                    (u for u in (self._index_url_for_version(v)
+                                 for v in self._restore_on_failure.values()) if u), None
+                )
+                idx = f" --index-url {index_url}" if index_url else ""
+                print()
+                print("  WARNING: this run had already removed the packages below in")
+                print("  order to replace them, and was interrupted before it could.")
+                print("  This environment may currently have no PyTorch.")
+                print()
+                print("  To put them back:")
+                print(f'    "{self.handler.python_path}" -m pip install{idx} {" ".join(pins)}')
+                print("  Or restore a backup:  --backup list  then  --backup-restore <n>")
+            elif self.installed_packages:
+                print(f"  Partially installed this run: "
+                      f"{', '.join(sorted(set(self.installed_packages)))}")
+                print("  Nothing was removed. Re-run --install to finish, or "
+                      "--cleanup to remove them.")
+            else:
+                print("  Nothing was installed or removed.")
+            self.logger.info("Interrupted by user; no rollback attempted")
+            raise
+
         except Exception as e:
             self.logger.error(f"Installation failed: {e}")
-            self.logger.info("Running cleanup...")
-            self.cleanup_installation()
+            # Roll back THIS run's installs only -- never the user's existing
+            # packages. See _rollback_failed_install() and Issue #36.
+            self.logger.info("Rolling back this run's changes...")
+            self._rollback_failed_install()
             return False
 
 
@@ -5410,4 +5628,9 @@ Examples:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except KeyboardInterrupt:
+        # install() has already explained the environment's state by this point.
+        print()
+        sys.exit(130)  # conventional shell exit code for SIGINT

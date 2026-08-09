@@ -82,7 +82,7 @@ python comfyui_triton_sageattention.py --install --verbose
 # Custom ComfyUI location
 python comfyui_triton_sageattention.py --install --base-path C:\path\to\comfyui
 
-# Cleanup previous installation
+# Cleanup previous installation (removes PyTorch too -- asks for confirmation first)
 python comfyui_triton_sageattention.py --cleanup
 ```
 
@@ -231,7 +231,7 @@ Like the project?
 ### Development Setup
 
 ```bash
-git clone https://github.com/djdarcy/comfyui-triton-and-sageattention-installer.git
+git clone https://github.com/DazzleML/comfyui-triton-and-sageattention-installer.git
 cd comfyui-triton-and-sageattention-installer
 python comfyui_triton_sageattention.py --install --verbose
 ```

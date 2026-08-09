@@ -5,54 +5,65 @@ All notable changes to the ComfyUI Triton and SageAttention installer will be do
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.8.12] - 2026-08-07
+## [0.8.13](https://github.com/DazzleML/comfyui-triton-and-sageattention-installer/compare/v0.8.12...v0.8.13) - 2026-08-09
 
-Fixes a fresh install failing outright on CUDA 13.2, plus a group of `--dryrun` defects that let the preview and the real run disagree. In the worst preview case it said "Nothing to do" while the run downgraded a working SageAttention 2.x to 1.0.6 (albeit when the user explicitly requested it, so not as bad as it could have been).
+Fixes a crash on non-English Windows, and several paths where a failed or interrupted install could remove packages it never installed.
 
 ### Fixed
-- **CUDA 13.2: a fresh install could not complete at all.** The installer asked pip for `torch`, `torchvision` and `torchaudio` from the `cu132` index in one command. That index carries torch and torchvision, but upstream has published **no `torchaudio` wheels for cu132 on any platform** — so pip failed the entire transaction and nothing was installed:
-
-  ```
-  ERROR: Could not find a version that satisfies the requirement torchaudio (from versions: none)
-  ERROR: No matching distribution found for torchaudio
-  ```
-
-  Installs on CUDA 13.2 now use the `cu130` index, which has the complete set. CUDA minor versions are forward-compatible, so cu130 builds run on a 13.2 driver. Verified end-to-end on an RTX 5090 (CUDA 13.2, driver 610.47): a fresh ComfyUI checkout and empty venv through to `torch 2.13.0+cu130` + `torchaudio 2.11.0+cu130` + SageAttention 2.2.0.post6, `pip check` clean, and the SageAttention kernel matching torch SDPA at cosine 0.99933.
-
-  This only affected installs where PyTorch was **not** already present. Once torch exists its own CUDA version takes priority over `nvcc`, which routed existing installs to cu130 anyway — which is why it went unnoticed: every test environment already had torch in it.
-- **`--sage-version` was ignored by the preview.** `--install --dryrun --sage-version 1` printed `Nothing to do - all components are already up to date`, and the identical command without `--dryrun` uninstalled SageAttention 2.2.0.post6 and installed 1.0.6. The requested version now reaches the plan, so the preview shows the change and the consent prompt fires. Confirmed on a real CUDA 13.0 / PyTorch 2.13 environment. If you have ever run `--sage-version` and got a result you did not expect, this is why. Check `--show-installed` and re-run without the flag to return to the auto-selected wheel.
-- **`--force` did nothing for Triton or SageAttention.** It was honored for PyTorch only; the other two silently stayed at KEEP. `--force` now reinstalls all three.
-- **SageAttention 3.x plus an explicit `--sage-version`** reported KEEP while the run performed a downgrade. The explicit request is now read before the "newer than we know about" shortcut applies. Without an explicit request, 3.x installations are still left alone.
-- **Plain `--install` ignored a KEEP decision for SageAttention**, uninstalling and reinstalling the same version. Only `--upgrade` consulted the plan.
-- **Fresh installs advertised a wheel the run would not use.** PyTorch installs before SageAttention, so the preview computed its answer against the *absent* torch and claimed the SageAttention 1.x fallback (and an unconstrained Triton) while the run installed 2.x with a pinned Triton. The preview now says `determined after PyTorch installs` rather than naming a version it cannot know.
-- **Wheel selection read the wrong Python.** It used the version of the interpreter *running* the installer instead of the target environment's. These differ whenever the installer is launched with a different Python than ComfyUI's — running `py comfyui_triton_sageattention.py` picks the newest installed Python, which need not be the one your venv or Portable install uses. The default `--sage-version auto` path was **not** affected, because the wheels it selects are ABI3 (one wheel covers Python 3.10+) and both versions clear the same floor. It affected two cases: an exact request such as `--sage-version 2.1.1`, where 14 of the 26 wheel configurations need an exact Python match — on a Python 3.12 target invoked from 3.13 this selected the `cp313` wheel instead of `cp312`, or found nothing at all and dropped to the SA 1.x fallback while a valid 2.x wheel existed; and target environments on a Python below an ABI3 wheel's floor (for example 3.9 against a `cp310-abi3` wheel), which were offered a wheel they cannot load.
-- **Preview and install could disagree about which CUDA version to match wheels against.** The preview preferred the CUDA that PyTorch was built with and fell back to `nvcc`; the run consulted `nvcc` only. Both now use the single value recorded in the plan.
-- **Crash when the `packaging` library was unavailable.** Two imports sat outside the guarded block, so an environment without `packaging` raised `ImportError` instead of taking the intended fallback path.
-- **Answering "no" to a destructive prompt did not cancel it.** The confirmation shown before a downgrade compared your answer against the single character `n`, so typing `no` — the most natural way to decline — did not match, and the downgrade proceeded and reported `Success!`. Reproduced end to end: answering `no` to `--sage-version 1` still replaced SageAttention 2.2.0.post6 with 1.0.6, exit code 0. All prompts now accept `y`/`yes`/`n`/`no` in any case, anything unrecognized is treated as "no", and a prompt with no terminal attached (cron, CI, a piped input that ran dry) cancels cleanly instead of raising `EOFError`. The affirmative side is fixed to match: prompts that previously only accepted `y` now also accept `yes`.
-- **An explicit `--sage-version X.Y.Z` could be silently ignored, depending on which Python launched the installer.** Deciding whether a request lowers the installed version falls back to a simpler comparison when the optional `packaging` library is missing, and that fallback compared only the major number — so 2.2.0.post6 → 2.1.1 looked like no change, the request was dropped from the plan, and both the preview and the real run reported there was nothing to do. The fallback now compares the full version, so the two agree regardless of the launching interpreter. `packaging` is not a required dependency, so this was reachable on any machine whose newest Python lacks it.
-- **Python development files were re-downloaded and re-extracted on every run.** The "are they already there?" check required at least five `.lib` files, but `python -m venv` creates exactly two (`python3.lib` and `python<XY>.lib`). It therefore reported them missing every time, so every install unpacked the dev-files archive over the venv again — including installs that changed nothing — and `Python development files already present` could never appear. ComfyUI Portable's bundled Python ships more `.lib` files, which is why this only affected venv users. The check now looks for the versioned import library the compiler actually links against.
-- **A run that changed nothing rewrote your launcher script.** `run_nvidia_gpu.bat` was regenerated from template on every install, silently discarding edits — extra flags, a different port, custom paths — that people commonly make to it. It is now left alone when the run changes nothing and a script already exists. A real install still refreshes it, and `--force` still rewrites it.
-- **Asking about backups created a virtual environment.** `--backup-clean` (or `--backup list`, or `--show-installed`) run from a directory that isn't a ComfyUI install would build a venv there and *then* report there was nothing to find. Environment setup ran from the handler's constructor, so merely starting the installer created one regardless of what you asked it to do. Only `--install`, `--upgrade` and `--run` create an environment now; everything else finds one if it's there and otherwise reports against system Python without writing anything.
-- **An install with nothing to do still modified the environment.** pip and setuptools were upgraded unconditionally, outside the plan. On a run where all three components reported `KEEP`, setuptools 82.0.1 was still uninstalled and replaced with 83.0.0 — and `--dryrun` never mentioned pip or setuptools at all. They are build tooling; when nothing is being built, touching them can only put a working environment at risk. The upgrade is now part of the plan like every other change, and is skipped when no component changes. The one exception is preserved: if setuptools sits outside a bound its own installed packages declare, that is corrected even on an otherwise no-op run, and the preview says so.
-- **The setuptools constraint reader matched other packages whose names merely start the same way.** `setuptools_scm>=7` and `setuptools-rust>=1.5.2` — both present in a real ComfyUI venv — were read as constraints on `setuptools` itself, producing a requirement for the wrong distribution, or, alongside a genuine constraint, the malformed `setuptools>=70.0.0,_scm>=7` that pip rejects. Matching now requires the whole name. `setuptools[core]>=70` still parses.
-- **`--show-installed` table borders did not line up.** The columns were a fixed width, but SageAttention version strings are routinely longer than the space allowed (`2.2.0+cu130torch2.9.0andhigher.post4` is 36 characters against a 28-character column), so that row ran past the rules above and below it and the right-hand border stuck out. Columns are now sized to their contents. Nothing is truncated — the box widens instead — and an environment with nothing installed renders at exactly the width it always did.
-- **The CUDA substitution was applied without being shown.** With the CUDA 13.2 fix above, the preview reported `PyTorch [INSTALL] >=2.5.0 (CUDA 13.0)` on a 13.2 machine and never said why — the explanation was assembled but no display path printed it, in either `--dryrun` or the real run. Substituting something the user did not ask for has to be visible, so both now show it: `>=2.5.0 (CUDA 13.0) (CUDA 13.2 wheels are incomplete upstream (no torchaudio) - using 13.0 builds)`.
-- **The preview's "Wheel Details" section contradicted its own summary.** Three cases, all found by running the installer for real rather than through tests: on a fresh install it printed `Will install: SA 1.0.6 from PyPI` directly beneath a summary line that correctly said the target was decided later; with `--sage-version 1` it warned "no SA 2.x wheel for your environment" when one existed and the user had simply chosen 1.x; and with any explicit `--sage-version` it showed the URL of the wheel *currently installed* rather than the one being installed. Each section now reports what the plan actually decided, and says so plainly when the answer genuinely is not known yet.
+- Install crashed on non-English Windows: command output was decoded with the machine's ANSI codepage while `nvcc`/`cl`/`nmake` print in the OEM one, so a single umlaut (`0x81`) raised `UnicodeDecodeError`. Output is now decoded so no locale can fail it ([Issue #36](https://github.com/DazzleML/comfyui-triton-and-sageattention-installer/issues/36)).
+- A failed install uninstalled torch, torchvision, torchaudio, triton, triton-windows and sageattention regardless of what it had installed (including when it had installed nothing). Rollback is now limited to that run's own installs.
+- A failed CPU-to-CUDA upgrade could leave no PyTorch at all. Versions are recorded before removal and restored on failure, with a printed recovery command if that also fails.
+- `--force` crashed on Windows instead of showing its confirmation prompt (introduced in 0.8.12).
+- Linux/macOS: a virtual environment that failed a version check was deleted, packages included, and in `--non-interactive` mode without asking. It is now left alone.
+- A failing environment probe took the whole install down instead of reporting "not usable" (which is the mechanism by which the decoding bug above escalated).
+- Ctrl-C printed a traceback and skipped recovery. It now reports what changed and how to restore it.
 
 ### Changed
-- Requests that lower a version are now marked `DOWNGRADE` in the plan, which routes them through the existing backup recommendation and consent prompt instead of proceeding silently.
-- Internal consolidation, no behavior change: the wheel-matching rule was written out three times (preview, report, install) and is now one function that all three call; installation reuses the wheel the plan already selected rather than re-deriving it; the six near-duplicate "ask the target environment about a package" helpers share one subprocess path; and the constraint reader added in 0.8.11 now takes the package name as an argument instead of hardcoding setuptools, so it can be pointed at another package without being rewritten. Verified against a 3,251-row snapshot of every version decision the installer can make — every decision identical before and after.
+- `--cleanup` lists what it will remove and asks first; declines under `--non-interactive`.
+
+### Testing
+- RTX 5090 / CUDA 13.2: fresh install through to working SageAttention (cosine 0.99933 vs PyTorch SDPA); repeat install writes nothing.
+- Non-English Windows reproduced with compiled German `nvcc`/`nmake` stand-ins (`tests/one-offs/make_german_locale_shims.py`).
+- Tests 224 → 254.
+
+## [0.8.12](https://github.com/DazzleML/comfyui-triton-and-sageattention-installer/compare/b30829c...v0.8.12) - 2026-08-07
+
+Fixes a fresh install failing outright on CUDA 13.2, plus a group of defects that let `--dryrun` predict one thing while the real run did another.
+
+### Fixed
+- CUDA 13.2 fresh installs failed and installed nothing: the `cu132` index publishes no `torchaudio` on any platform, and all three packages were requested at once. Installs on 13.2 now use the complete `cu130` set (verified on RTX 5090, cosine 0.99933).
+- `--sage-version` never reached the plan, so the preview said "Nothing to do" while the run performed the requested change.
+- Answering "no" to a confirmation prompt did not cancel it — only the single character `n` did.
+- `--force` applied to PyTorch only; Triton and SageAttention silently stayed at KEEP.
+- Plain `--install` ignored a KEEP decision and reinstalled SageAttention.
+- SageAttention 3.x plus an explicit `--sage-version` reported KEEP, then downgraded.
+- Fresh installs previewed the SageAttention 1.x fallback and an unconstrained Triton, then installed 2.x with a pinned Triton. The preview now says the target is determined after PyTorch installs.
+- An explicit `--sage-version 2.1.1` could be dropped depending on which Python launched the installer.
+- Wheel selection read the interpreter running the installer rather than the target environment's.
+- Preview and install could disagree about which CUDA to match wheels against.
+- An install with nothing to do still upgraded pip/setuptools, re-extracted Python headers, and overwrote `run_nvidia_gpu.bat` — discarding user edits. It now writes nothing.
+- Asking about backups from a non-ComfyUI directory created a virtual environment there.
+- The setuptools constraint reader matched `setuptools_scm` and `setuptools-rust`, producing a requirement for the wrong package.
+- `--show-installed` table borders did not line up with long SageAttention versions.
+- Crash when the `packaging` library was unavailable.
+
+### Changed
+- Requests that lower a version are marked `DOWNGRADE`, routing them through the backup recommendation and consent prompt.
+- Internal consolidation, no behavior change: one wheel-matching predicate instead of three, installation reuses the wheel the plan chose, and six near-duplicate environment queries share one subprocess path.
 
 ### Removed
-- Three unused downgrade-detection helpers (~96 lines) that shipped with no callers and were never reachable. The downgrade *reporting* they appeared to serve is unaffected and is now actually wired up (see Changed).
+- Three downgrade-detection helpers (~96 lines) that shipped with no callers.
+
+### Testing
+- Fresh ComfyUI and empty venv through to a working install; repeat install verified to write nothing.
+- Verified against a 3,251-row snapshot of every version decision — identical before and after.
+- Tests 158 → 224.
 
 ### Notes
-- Adds `tests/unit/test_plan_exec_agreement.py` and `tests/unit/test_display_rendering.py`. The existing 158 tests could not detect any of the defects above: they check that the plan is generated correctly against a fully-populated environment, and never run an installation path. Test count 158 → 224.
-- Adds `tests/checklists/v0.8.12__Epic__plan-execute-integrity.md`, a hand-runnable checklist covering what mocked tests cannot reach — real pip resolution, GPU kernel correctness, interactive consent prompts, console rendering, and cross-Python behavior. Several fixes in this release were found by running it.
-- The CUDA 13.2 index substitution is kept in its own table, separate from the SageAttention wheel aliases. The two answer different questions and already disagree: the SA table also maps CUDA 12.9 to 12.8 because no cu129 SageAttention wheel exists, but the cu129 PyTorch index is complete and must not be redirected. A test asserts that specific case.
-- **Version 0.8.11 was never tagged or released** — its fix is included here.
+- The CUDA 13.2 index substitution is kept separate from the SageAttention wheel aliases; the two already disagree (CUDA 12.9 uses the cu128 wheel, but the cu129 PyTorch index is complete and is not redirected).
+- Version 0.8.11 was never tagged or released — its setuptools fix is included here.
 
-## [0.8.11] - 2026-08-07
+## [0.8.11](https://github.com/DazzleML/comfyui-triton-and-sageattention-installer/compare/v0.8.10...b30829c) - 2026-08-07
 
 Stop upgrading setuptools past bounds declared by installed packages, which left environments in a state pip itself reports as broken.
 
@@ -75,7 +86,7 @@ Stop upgrading setuptools past bounds declared by installed packages, which left
 - Only PyTorch 2.12.x declares an upper bound today; torch 2.13 declares `setuptools>=77.0.3` with no ceiling, so those environments were never affected.
 - This was the only unconditional environment mutation in the install flow — every other pip call is gated by the InstallPlan.
 
-## [0.8.10] - 2026-07-23
+## [0.8.10](https://github.com/DazzleML/comfyui-triton-and-sageattention-installer/compare/v0.8.9...v0.8.10) - 2026-07-23
 
 Add SA 2.x support for PyTorch 2.13 (CUDA 13.0/13.2), and move the "andhigher" wheels from post5 to post6 to pick up an upstream black/noise output fix.
 
@@ -88,7 +99,7 @@ Add SA 2.x support for PyTorch 2.13 (CUDA 13.0/13.2), and move the "andhigher" w
 ### Notes
 - Existing torch 2.12 users on post5 are **not** force-migrated: a plain `--install` keeps the current SA install (plan says KEEP). Run `--upgrade` to move to the fixed post6 wheel. post5 remains a valid upstream wheel with the noted caveat.
 
-## [0.8.9] - 2026-06-17
+## [0.8.9](https://github.com/DazzleML/comfyui-triton-and-sageattention-installer/compare/v0.8.8...v0.8.9) - 2026-06-17
 
 Add SA 2.x support for CUDA 13.2 / PyTorch 2.12 via a tested wheel alias, and bring the installer current with the upstream post5 wheels. Found by the CUDA-minor gap sweep that followed Issue #32.
 
@@ -105,7 +116,7 @@ Add SA 2.x support for CUDA 13.2 / PyTorch 2.12 via a tested wheel alias, and br
 ### Notes
 - cu118/cu121 remain on SA 1.x: they have no safe lower same-major SA wheel to alias down to (CUDA minor-compat is forward-only). torch 2.12 on cu126 also falls back (post5 has no cu126 wheel).
 
-## [0.8.8] - 2026-06-17
+## [0.8.8](https://github.com/DazzleML/comfyui-triton-and-sageattention-installer/compare/v0.8.7...v0.8.8) - 2026-06-17
 
 Add SA 2.x support for CUDA 12.9 via a tested wheel alias. Previously, a PyTorch build reporting CUDA 12.9 fell back to SageAttention 1.x because no `cu129` wheel exists upstream.
 
@@ -119,7 +130,7 @@ Add SA 2.x support for CUDA 12.9 via a tested wheel alias. Previously, a PyTorch
 - The alias is deliberately narrow: only `cu129 -> cu128` (tested). Other CUDA-minor gaps still fall back to SA 1.x until individually verified. A broader gap-coverage sweep is tracked as a follow-up.
 - No system CUDA toolkit change is required — the matched CUDA runtime ships inside the PyTorch wheel; the installer keys off `torch.version.cuda`.
 
-## [0.8.7] - 2026-03-31
+## [0.8.7](https://github.com/DazzleML/comfyui-triton-and-sageattention-installer/compare/v0.8.6...v0.8.7) - 2026-03-31
 
 Add SA 2.x wheel support for PyTorch 2.11 and promote post4 from experimental to stable for PyTorch 2.9.
 
@@ -131,7 +142,7 @@ Add SA 2.x wheel support for PyTorch 2.11 and promote post4 from experimental to
 - **Promote post4 for PyTorch 2.9**: SA 2.2.0.post4 no longer requires `--experimental` for torch 2.9.x. The same wheel already serves torch 2.10/2.11 as stable -- gating it for 2.9 was inconsistent. Post4 adds `torch.compile` support over post3 (same kernels otherwise) and is now the default for all torch >= 2.9 fresh installs. Existing post3 users are not affected (plan says KEEP).
 - **`--experimental` flag**: Now reports "no experimental wheels available" when all wheels are stable, instead of showing a misleading warning. The flag remains functional for future prerelease wheels.
 
-## [0.8.6] - 2026-03-16
+## [0.8.6](https://github.com/DazzleML/comfyui-triton-and-sageattention-installer/compare/v0.8.5...v0.8.6) - 2026-03-16
 
 Fix dryrun/actual divergence in Triton and SageAttention upgrade paths. Execution methods now consult the InstallPlan as single source of truth, matching the pattern established for PyTorch in Issue #18.
 
@@ -144,7 +155,7 @@ Fix dryrun/actual divergence in Triton and SageAttention upgrade paths. Executio
 ### Design
 - `2026-03-16__15-44-44__full-postmortem_dryrun-actual-divergence-triton-sa-upgrade.md`
 
-## [0.8.5] - 2026-03-16
+## [0.8.5](https://github.com/DazzleML/comfyui-triton-and-sageattention-installer/compare/0cd58d8...v0.8.5) - 2026-03-16
 
 Add SageAttention 2.x wheel support for PyTorch 2.10 + CUDA 13.0/12.8 environments, enabling SA 2.x on Blackwell GPUs (RTX 50-series). Uses the upstream "andhigher" forward-compatible wheels from woct0rdho/SageAttention v2.2.0-windows.post4.
 
@@ -158,7 +169,7 @@ Thanks to [@joednemesis](https://github.com/DazzleML/comfyui-triton-and-sageatte
 ### Note
 - SageAttention's CUDA kernel path has known instability on some Blackwell GPUs (woct0rdho/SageAttention#87). The Triton fallback path works but may not provide acceleration. This is an upstream issue.
 
-## [0.8.4] - 2026-02-27
+## [0.8.4](https://github.com/DazzleML/comfyui-triton-and-sageattention-installer/compare/babfb11...0cd58d8) - 2026-02-27
 
 Schema versioning, delta-based dedup, and totals repair for the traffic collection workflow. Ports the mature data-quality fixes from NCSI v0.7.12 to eliminate silent data loss from boolean set-based dedup and phantom CI subtraction.
 
@@ -175,7 +186,7 @@ Schema versioning, delta-based dedup, and totals repair for the traffic collecti
 - **Pre-repo entry filtering** — removes Traffic API 14-day backfill entries that predate the repository
 - **Totals sanity repair** — raises under-counted totals to match dailyHistory sums (never lowers), fixing first-run seeding bugs
 
-## [0.8.3] - 2026-02-26
+## [0.8.3](https://github.com/DazzleML/comfyui-triton-and-sageattention-installer/compare/557fcb0...babfb11) - 2026-02-26
 
 Full port of the mature stats system (NCSI v0.7.9–v0.7.11) to the triton workflow and dashboard. Adds CI clone detection, organic clone separation, unique tracking, Dev tab with GitHub Statistics API, and data quality improvements.
 
@@ -234,7 +245,7 @@ Full port of the mature stats system (NCSI v0.7.9–v0.7.11) to the triton workf
 - Stars/forks/openIssues no longer overwritten on historical entries — scoped to today's entry only
 - Badge recency suffix `(+N 24h)` now uses yesterday's complete data instead of last 2 API dates (~48h)
 
-## [0.8.2] - 2026-02-24
+## [0.8.2](https://github.com/DazzleML/comfyui-triton-and-sageattention-installer/compare/122512c...557fcb0) - 2026-02-24
 
 ### Added
 - **Tabbed stats dashboard** — Installs, Views, Community, and Overview tabs
@@ -253,7 +264,7 @@ Full port of the mature stats system (NCSI v0.7.9–v0.7.11) to the triton workf
 - Total line renders as area-only when it overlaps an individual metric line
 - "Today's Views" card falls back to last day with real data instead of showing 0
 
-## [0.8.1] - 2026-02-24
+## [0.8.1](https://github.com/DazzleML/comfyui-triton-and-sageattention-installer/compare/v0.8.0...122512c) - 2026-02-24
 
 ### Added
 - **Install statistics dashboard** — GitHub Pages stats page at `/docs/stats/` with Chart.js daily activity chart, summary cards, and archive integration
@@ -265,7 +276,7 @@ Full port of the mature stats system (NCSI v0.7.9–v0.7.11) to the triton workf
 - Clarify `RESOURCES` array comment to note opt-in behavior and maintainer ownership ([#27](https://github.com/DazzleML/comfyui-triton-and-sageattention-installer/issues/27))
 - Document optional reference resources under `--with-custom-nodes` in `docs/parameters.md` ([#27](https://github.com/DazzleML/comfyui-triton-and-sageattention-installer/issues/27))
 
-## [0.8.0] - 2026-01-26
+## [0.8.0](https://github.com/DazzleML/comfyui-triton-and-sageattention-installer/compare/f20c748...v0.8.0) - 2026-01-26
 
 ### Added
 - **ComfyUI Installation Discovery** - Automatically finds ComfyUI installations when running from wrong directory
@@ -303,7 +314,7 @@ Full port of the mature stats system (NCSI v0.7.9–v0.7.11) to the triton workf
 ### Fixed (Issue #25)
 - Users running from wrong directory now get helpful discovery instead of confusing errors
 
-## [0.7.4] - 2026-01-25
+## [0.7.4](https://github.com/DazzleML/comfyui-triton-and-sageattention-installer/compare/7c2ea33...f20c748) - 2026-01-25
 
 ### Changed (Tests)
 - Refactored `test_backup.py` to reduce duplication (-45% lines)
@@ -312,7 +323,7 @@ Full port of the mature stats system (NCSI v0.7.9–v0.7.11) to the triton workf
 - Used `@pytest.mark.parametrize` for env type tests (venv, .venv, custom)
 - Test count: 82 → 83 (parameterization covers more combinations)
 
-## [0.7.3] - 2026-01-25
+## [0.7.3](https://github.com/DazzleML/comfyui-triton-and-sageattention-installer/compare/f96f817...7c2ea33) - 2026-01-25
 
 ### Added
 - `.venv` detection in auto mode (supports uv, poetry, and modern Python tooling)
@@ -330,7 +341,7 @@ Full port of the mature stats system (NCSI v0.7.9–v0.7.11) to the triton workf
 ### Added (Tests)
 - 4 new unit tests for `.venv` backup support (82 total)
 
-## [0.7.2] - 2026-01-05
+## [0.7.2](https://github.com/DazzleML/comfyui-triton-and-sageattention-installer/compare/v0.7.1...f96f817) - 2026-01-05
 
 ### Fixed
 - `--backup-clean` help text now correctly states `'all'` keyword is required (not implicit)
@@ -339,7 +350,7 @@ Full port of the mature stats system (NCSI v0.7.9–v0.7.11) to the triton workf
 - Moved `--upgrade` to appear right after `--install` in help output for discoverability
 - Added `--upgrade --base-path` example to help epilog
 
-## [0.7.1](https://github.com/djdarcy/comfyui-triton-and-sageattention-installer/compare/a924cfc...v0.7.1) - 2026-01-05
+## [0.7.1](https://github.com/DazzleML/comfyui-triton-and-sageattention-installer/compare/a924cfc...v0.7.1) - 2026-01-05
 
 ### Fixed
 - **CPU→CUDA PyTorch upgrade now works correctly** (Issue #23)
@@ -355,7 +366,7 @@ Full port of the mature stats system (NCSI v0.7.9–v0.7.11) to the triton workf
 - 3 new unit tests for CPU→CUDA switch behavior (78 total)
 - Documentation for Issue #22 GPU detection integration points
 
-## [0.7.0](https://github.com/djdarcy/comfyui-triton-and-sageattention-installer/compare/1672dd0...a924cfc) - 2026-01-05
+## [0.7.0](https://github.com/DazzleML/comfyui-triton-and-sageattention-installer/compare/1672dd0...a924cfc) - 2026-01-05
 
 ### Added
 - **Environment backup feature** for safe upgrades with full restore capability
@@ -375,7 +386,7 @@ Full port of the mature stats system (NCSI v0.7.9–v0.7.11) to the triton workf
 - Non-interactive mode refuses destructive operations to prevent accidental data loss
 - Updated Quick Start documentation to recommend backup before install
 
-## [0.6.12](https://github.com/djdarcy/comfyui-triton-and-sageattention-installer/compare/8825c97...1672dd0) - 2026-01-05
+## [0.6.12](https://github.com/DazzleML/comfyui-triton-and-sageattention-installer/compare/8825c97...1672dd0) - 2026-01-05
 
 ### Added
 - Pre-installation validation for exact SageAttention version availability
@@ -388,7 +399,7 @@ Full port of the mature stats system (NCSI v0.7.9–v0.7.11) to the triton workf
 ### Changed
 - Enhanced upgrade test suite to verify error message behavior for incompatible versions
 
-## [0.6.11](https://github.com/djdarcy/comfyui-triton-and-sageattention-installer/compare/923ed15...8825c97) - 2026-01-05
+## [0.6.11](https://github.com/DazzleML/comfyui-triton-and-sageattention-installer/compare/923ed15...8825c97) - 2026-01-05
 
 ### Added
 - Comprehensive test suite with 59 unit test scenarios validating InstallPlan decision logic
@@ -401,7 +412,7 @@ Full port of the mature stats system (NCSI v0.7.9–v0.7.11) to the triton workf
 ### Changed
 - One-off tests now skip incompatible SA version scenarios (SA 2.1.1 only has wheels for PyTorch <= 2.8)
 
-## [0.6.10](https://github.com/djdarcy/comfyui-triton-and-sageattention-installer/compare/v0.6.8...923ed15) - 2026-01-05
+## [0.6.10](https://github.com/DazzleML/comfyui-triton-and-sageattention-installer/compare/v0.6.8...923ed15) - 2026-01-05
 
 ### Added
 - InstallPlan architecture for unified dryrun/install decision logic
@@ -418,7 +429,7 @@ Full port of the mature stats system (NCSI v0.7.9–v0.7.11) to the triton workf
 - Removed hardcoded torch==2.7.0, letting pip resolve latest compatible version
 - Both preview_changes() and install now call _check_pytorch_compatibility() for consistency
 
-## [0.6.9](https://github.com/djdarcy/comfyui-triton-and-sageattention-installer/compare/23422e4...67c3575) - 2025-12-19
+## [0.6.9](https://github.com/DazzleML/comfyui-triton-and-sageattention-installer/compare/23422e4...67c3575) - 2025-12-19
 
 ### Added
 - Unified `--python` flag for explicit Python environment selection
@@ -430,7 +441,7 @@ Full port of the mature stats system (NCSI v0.7.9–v0.7.11) to the triton workf
 - Default behavior remains auto-detection: portable > venv > system
 - Updated README with --python flag examples
 
-## [0.6.8](https://github.com/djdarcy/comfyui-triton-and-sageattention-installer/compare/3773611...23422e4) - 2025-12-19 (v0.6.7 in commit)
+## [0.6.8](https://github.com/DazzleML/comfyui-triton-and-sageattention-installer/compare/3773611...23422e4) - 2025-12-19 (v0.6.7 in commit)
 
 ### Added
 - Environment type tracking (portable, venv, system) via environment_type property
@@ -444,20 +455,20 @@ Full port of the mature stats system (NCSI v0.7.9–v0.7.11) to the triton workf
 - show_installed() and preview_changes() now display detected environment type
 - WindowsHandler logs "Detected ComfyUI Portable distribution" when python_embeded folder found
 
-## [0.6.6](https://github.com/djdarcy/comfyui-triton-and-sageattention-installer/compare/320ca8d...3773611) - 2025-12-09
+## [0.6.6](https://github.com/DazzleML/comfyui-triton-and-sageattention-installer/compare/320ca8d...3773611) - 2025-12-09
 
 ### Changed
 - `--upgrade` and `--install` flags now automatically fix Triton compatibility issues
 - Improved automatic handling of Triton/PyTorch version mismatches
 
-## [0.6.5](https://github.com/djdarcy/comfyui-triton-and-sageattention-installer/compare/6f9fae7...320ca8d) - 2025-12-09
+## [0.6.5](https://github.com/DazzleML/comfyui-triton-and-sageattention-installer/compare/6f9fae7...320ca8d) - 2025-12-09
 
 ### Added
 - Triton/PyTorch version compatibility checking
 - Validation to prevent installation of incompatible Triton versions
 - Warning messages when version conflicts detected
 
-## [0.6.4](https://github.com/djdarcy/comfyui-triton-and-sageattention-installer/compare/8cb1f69...6f9fae7) - 2025-12-08
+## [0.6.4](https://github.com/DazzleML/comfyui-triton-and-sageattention-installer/compare/8cb1f69...6f9fae7) - 2025-12-08
 
 ### Added
 - `--dryrun` flag to preview installation changes without executing them
@@ -468,7 +479,7 @@ Full port of the mature stats system (NCSI v0.7.9–v0.7.11) to the triton workf
 ### Changed
 - Improved output formatting for cleaner copy-paste operations
 
-## [0.6.3](https://github.com/djdarcy/comfyui-triton-and-sageattention-installer/compare/8705998...da06fdd) - 2025-12-08
+## [0.6.3](https://github.com/DazzleML/comfyui-triton-and-sageattention-installer/compare/8705998...da06fdd) - 2025-12-08
 
 ### Added
 - SageAttention 2.x compatibility display showing available pre-built wheels
@@ -476,13 +487,13 @@ Full port of the mature stats system (NCSI v0.7.9–v0.7.11) to the triton workf
 ### Changed
 - Enhanced dryrun output with more detailed package information
 
-## [0.6.2](https://github.com/djdarcy/comfyui-triton-and-sageattention-installer/compare/d648a90...8705998) - 2025-12-08
+## [0.6.2](https://github.com/DazzleML/comfyui-triton-and-sageattention-installer/compare/d648a90...8705998) - 2025-12-08
 
 ### Added
 - `--show-installed` flag to display current environment status
 - Detailed package version reporting for installed components
 
-## [0.6.1](https://github.com/djdarcy/comfyui-triton-and-sageattention-installer/compare/513e10e...d648a90) - 2025-12-08
+## [0.6.1](https://github.com/DazzleML/comfyui-triton-and-sageattention-installer/compare/513e10e...d648a90) - 2025-12-08
 
 ### Added
 - `--with-custom-nodes` flag to opt-in to custom node installation
@@ -491,7 +502,7 @@ Full port of the mature stats system (NCSI v0.7.9–v0.7.11) to the triton workf
 - Custom node installation is now opt-in rather than automatic
 - Reduces installation footprint for users who don't need custom nodes
 
-## [0.6.0](https://github.com/djdarcy/comfyui-triton-and-sageattention-installer/compare/0fdbb2b...513e10e) - 2025-12-07
+## [0.6.0](https://github.com/DazzleML/comfyui-triton-and-sageattention-installer/compare/0fdbb2b...513e10e) - 2025-12-07
 
 ### Added
 - `--upgrade` flag to update existing SageAttention installations
@@ -502,7 +513,7 @@ Full port of the mature stats system (NCSI v0.7.9–v0.7.11) to the triton workf
 - Installation logic now handles version upgrades intelligently
 - Better handling of existing installations during upgrade process
 
-## [0.5.9](https://github.com/djdarcy/comfyui-triton-and-sageattention-installer/compare/e0f222c...e4da3aa) - 2025-12-07
+## [0.5.9](https://github.com/DazzleML/comfyui-triton-and-sageattention-installer/compare/e0f222c...e4da3aa) - 2025-12-07
 
 ### Added
 - `--experimental` flag to opt-in to experimental/prerelease versions (Issue #9)
@@ -519,12 +530,12 @@ Full port of the mature stats system (NCSI v0.7.9–v0.7.11) to the triton workf
 - Experimental versions now filtered by default
 - PyTorch pattern matching now supports major.minor patterns (2.7 matches 2.7.x)
 
-## [0.5.8](https://github.com/djdarcy/comfyui-triton-and-sageattention-installer/compare/586630a...e0f222c) - 2025-12-07
+## [0.5.8](https://github.com/DazzleML/comfyui-triton-and-sageattention-installer/compare/586630a...e0f222c) - 2025-12-07
 
 ### Changed
 - Revised SageAttention installation instructions in documentation
 
-## [0.5.7](https://github.com/djdarcy/comfyui-triton-and-sageattention-installer/compare/2918be0...586630a) - 2025-12-07
+## [0.5.7](https://github.com/DazzleML/comfyui-triton-and-sageattention-installer/compare/2918be0...586630a) - 2025-12-07
 
 ### Added
 - `--sage-version` flag for explicit SageAttention version control (Issue #7)
@@ -542,27 +553,27 @@ Full port of the mature stats system (NCSI v0.7.9–v0.7.11) to the triton workf
 - Verified on fresh ComfyUI install with PyTorch 2.7.0+cu128, CUDA 12.8, Python 3.12
 - Confirmed working with RTX 5090 and SageAttention 2.1.1
 
-## [0.5.6](https://github.com/djdarcy/comfyui-triton-and-sageattention-installer/compare/6a6665e...2918be0) - 2025-12-07
+## [0.5.6](https://github.com/DazzleML/comfyui-triton-and-sageattention-installer/compare/6a6665e...2918be0) - 2025-12-07
 
 ### Added
 - SageAttention version documentation in troubleshooting section
 - Guidance for version selection and compatibility
 
-## [0.5.5](https://github.com/djdarcy/comfyui-triton-and-sageattention-installer/compare/e09d43a...6a6665e) - 2025-09-17
+## [0.5.5](https://github.com/DazzleML/comfyui-triton-and-sageattention-installer/compare/e09d43a...6a6665e) - 2025-09-17
 
 ### Added
 - AI Toolkit RTX 5090 installer for Blackwell architecture support
 - Support for latest NVIDIA GPU architecture
 - Installation instructions for RTX 5090 users
 
-## [0.5.0](https://github.com/djdarcy/comfyui-triton-and-sageattention-installer/compare/72a1a7c...e09d43a) - 2025-07-22
+## [0.5.0](https://github.com/DazzleML/comfyui-triton-and-sageattention-installer/compare/72a1a7c...e09d43a) - 2025-07-22
 
 ### Added
 - Version support to installer with `__version__` variable
 - `--version` CLI argument to display installer version
 - Version tracking in code for better release management
 
-## [0.4.0](https://github.com/djdarcy/comfyui-triton-and-sageattention-installer/compare/f9af2f9...72a1a7c) - 2025-07-22
+## [0.4.0](https://github.com/DazzleML/comfyui-triton-and-sageattention-installer/compare/f9af2f9...72a1a7c) - 2025-07-22
 
 ### Fixed
 - CI/CD configuration and project metadata corrections
@@ -571,12 +582,12 @@ Full port of the mature stats system (NCSI v0.7.9–v0.7.11) to the triton workf
 - Updated project metadata for better package management
 - Improved continuous integration workflows
 
-## [0.3.0](https://github.com/djdarcy/comfyui-triton-and-sageattention-installer/compare/35a6573...f9af2f9) - 2025-07-22
+## [0.3.0](https://github.com/DazzleML/comfyui-triton-and-sageattention-installer/compare/35a6573...f9af2f9) - 2025-07-22
 
 ### Changed
 - Minor README touchups for clarity and formatting
 
-## [0.2.0](https://github.com/djdarcy/comfyui-triton-and-sageattention-installer/compare/1d64962...35a6573) - 2025-07-22
+## [0.2.0](https://github.com/DazzleML/comfyui-triton-and-sageattention-installer/compare/1d64962...35a6573) - 2025-07-22
 
 ### Added
 - Initial commit of ComfyUI Triton and SageAttention installer
@@ -593,7 +604,7 @@ Full port of the mature stats system (NCSI v0.7.9–v0.7.11) to the triton workf
 - CUDA version detection
 - PyTorch version compatibility checking
 
-## [0.1.0](https://github.com/djdarcy/comfyui-triton-and-sageattention-installer/releases/tag/v0.1.0) - 2025-07-22
+## [0.1.0](https://github.com/DazzleML/comfyui-triton-and-sageattention-installer/releases/tag/v0.1.0) - 2025-07-22
 
 ### Added
 - Claude AI integration files for development assistance

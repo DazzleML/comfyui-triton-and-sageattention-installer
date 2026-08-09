@@ -14,7 +14,7 @@ python comfyui_triton_sageattention.py [ACTION] [OPTIONS]
 |------|-------------|
 | `--install [MODE]` | Install Triton and SageAttention. Optional `discover` mode for interactive selection. |
 | `--upgrade [MODE]` | Upgrade existing SageAttention installation. Optional `discover` mode. |
-| `--cleanup` | Remove Triton/SageAttention packages |
+| `--cleanup` | Remove the Triton/SageAttention/PyTorch packages. Lists what will go and asks for confirmation; declines under `--non-interactive`. |
 | `--run` | Run ComfyUI with SageAttention enabled |
 | `--show-installed [MODE]` | Display installation info (see modes below) |
 | `--dryrun` | Preview changes without executing (requires `--install` or `--upgrade`) |
@@ -233,6 +233,14 @@ python comfyui_triton_sageattention.py --upgrade
 python comfyui_triton_sageattention.py --cleanup
 python comfyui_triton_sageattention.py --install
 ```
+
+`--cleanup` uninstalls PyTorch along with Triton and SageAttention, so anything else in
+that environment depending on torch will stop working. It prints the list and asks
+before removing anything, and under `--non-interactive` it declines rather than
+assuming consent.
+
+This is separate from what happens when an install *fails*: that only rolls back
+packages the failed run itself installed, never ones that were already there.
 
 ### CI/Docker Automation
 

@@ -11,7 +11,7 @@ Please be respectful and constructive. We're all here to help make ComfyUI bette
 ### Reporting Bugs
 
 Before submitting a bug report:
-1. Check the [existing issues](https://github.com/djdarcy/comfyui-triton-and-sageattention-installer/issues)
+1. Check the [existing issues](https://github.com/DazzleML/comfyui-triton-and-sageattention-installer/issues)
 2. Run with `--verbose` flag: `python comfyui_triton_sageattention.py --install --verbose`
 3. Check `comfyui_install.log` for detailed error information
 
