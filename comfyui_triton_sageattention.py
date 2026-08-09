@@ -43,7 +43,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 # Version information
-__version__ = "0.8.13"
+__version__ = "0.8.14"
 
 
 def parse_sage_version(version_str: str) -> Tuple[Optional[int], Optional[str]]:
@@ -2210,11 +2210,23 @@ class ComfyUIInstaller(ConfirmMixin):
 
     INCLUDE_LIBS_URL = "https://github.com/woct0rdho/triton-windows/releases/download/v3.0.0-windows.post1/python_3.12.7_include_libs.zip"
     
-    # Packages to track for cleanup (matches batch script exactly)
-    TRITON_PACKAGES = [
-        "triton-windows", "triton", "sageattention",
-        "torch", "torchvision", "torchaudio"
-    ]
+    # What --cleanup removes. The acceleration stack is the point of this tool
+    # and the thing that actually needs resetting; PyTorch is a multi-GB shared
+    # dependency that everything else in a ComfyUI environment imports.
+    #
+    # These used to be one list, inherited verbatim from the original batch
+    # script ("matches batch script exactly"), so a plain --cleanup removed
+    # PyTorch too. The documented "clean slate reinstall" is --cleanup followed
+    # by --install, and an --install can fail for reasons outside the user's
+    # control -- a missing upstream wheel is enough, which is part of why v0.8.13
+    # exists. That sequence could leave someone with no PyTorch and no way back,
+    # since rollback only undoes what the failed run itself installed. Removing
+    # PyTorch is now opt-in via `--cleanup all`.
+    ACCELERATION_PACKAGES = ["triton-windows", "triton", "sageattention"]
+    PYTORCH_PACKAGES = ["torch", "torchvision", "torchaudio"]
+
+    # Full teardown set, used by `--cleanup all`.
+    TRITON_PACKAGES = ACCELERATION_PACKAGES + PYTORCH_PACKAGES
 
     # CUDA minor-version wheel aliases: detected_cuda_code -> wheel_cuda_code.
     # When PyTorch reports a CUDA minor that has no dedicated SageAttention wheel,
@@ -2400,21 +2412,86 @@ class ComfyUIInstaller(ConfirmMixin):
         # back too -- otherwise a failed upgrade leaves no PyTorch at all.
         self._restore_removed_packages()
 
-    def cleanup_installation(self):
-        """Remove ComfyUI's GPU stack and build artifacts (explicit --cleanup).
+        self._report_missing_pytorch()
 
-        User-invoked teardown, so the scope is the known package set rather than
-        this run's installs. That makes it destructive by design -- it removes
-        PyTorch -- so unlike the failure path it asks first, and declines in
+    def _report_missing_pytorch(self):
+        """After a failed install, say so if the environment has no PyTorch.
+
+        "Nothing to roll back" is true and reads like an all-clear, but it is the
+        last line someone sees when their environment is unusable. That happens on
+        a plain fresh install that failed as easily as after `--cleanup all` --
+        the installer cannot tell the two apart, because by the time it plans, the
+        packages are already absent either way.
+
+        So this does not try to attribute anything. It reports the end state and
+        hands over the exact command, because the README promises this tool
+        installs PyTorch and a user should not be stranded when it could not.
+
+        The pytorch.org link matters most in the case where OUR index choice is
+        what failed -- see the cu132 torchaudio gap fixed in 0.8.13. Repeating a
+        broken index back at the user helps nobody.
+        """
+        if self._restore_on_failure:
+            return  # already told them, with versions -- do not repeat
+
+        if self._get_installed_version("torch"):
+            return  # PyTorch is present; the failure was elsewhere
+
+        print()
+        print("  This environment has no PyTorch, and the install did not finish.")
+
+        index_url = None
+        plan = getattr(self, "_current_plan", None)
+        cuda = getattr(plan, "cuda_for_wheels", None) if plan else None
+        if cuda and cuda != "cpu":
+            try:
+                index_url = self.handler.get_pytorch_install_url(cuda)
+            except Exception:
+                index_url = None
+
+        print("  To install it yourself:")
+        idx = f" --index-url {index_url}" if index_url else ""
+        print(f'    "{self.handler.python_path}" -m pip install{idx} '
+              f'"torch>=2.5.0" torchvision torchaudio')
+        print("  If that fails too, pick a build for your setup at")
+        print("    https://pytorch.org/get-started/locally/")
+
+        # No CUDA detected means the command above installs a CPU-only build,
+        # which is almost certainly not what someone installing SageAttention
+        # wants. The README badge has always linked here; the tool never did.
+        if not index_url:
+            print()
+            print("  NOTE: no CUDA toolkit was detected, so that command installs a")
+            print("  CPU-only PyTorch -- SageAttention needs CUDA. If you have an")
+            print("  NVIDIA GPU, install the toolkit first:")
+            print("    https://developer.nvidia.com/cuda-downloads")
+            print()
+
+        print("  Or restore a backup:  --backup list  then  --backup-restore <n>")
+        self.logger.info("Reported missing PyTorch after failed install")
+
+    def cleanup_installation(self, include_pytorch: bool = False):
+        """Remove the acceleration stack and build artifacts (explicit --cleanup).
+
+        User-invoked teardown, so the scope is a known package set rather than
+        this run's installs -- but PyTorch is only included when explicitly asked
+        for with `--cleanup all`. Either way this asks first, and declines in
         non-interactive mode rather than assuming consent.
         """
         self.logger.info("Starting cleanup process...")
 
+        packages = (self.TRITON_PACKAGES if include_pytorch
+                    else self.ACCELERATION_PACKAGES)
+
         print("The following packages will be UNINSTALLED:")
-        for pkg in self.TRITON_PACKAGES:
+        for pkg in packages:
             print(f"    {pkg}")
-        print("  This includes PyTorch. Anything else in this environment that")
-        print("  depends on it will stop working.")
+        if include_pytorch:
+            print("  This includes PyTorch. Anything else in this environment that")
+            print("  depends on it will stop working, and reinstalling it means")
+            print("  downloading several GB again.")
+        else:
+            print("  PyTorch is NOT removed. Use `--cleanup all` if you want that too.")
 
         if self.interactive:
             if not self._confirm("Remove these packages?"):
@@ -2429,7 +2506,7 @@ class ComfyUIInstaller(ConfirmMixin):
 
         print("Uninstalling Triton dependency...")
         try:
-            self.handler.pip_uninstall(self.TRITON_PACKAGES)
+            self.handler.pip_uninstall(packages)
         except Exception as e:
             self.logger.warning(f"Some packages could not be uninstalled: {e}")
         
@@ -5251,8 +5328,12 @@ Examples:
 
     parser.add_argument(
         "--cleanup",
-        action="store_true", 
-        help="Clean up previous installation (equivalent to Step 1 batch script)"
+        nargs="?",
+        const="default",
+        default=None,
+        metavar="MODE",
+        help="Remove Triton and SageAttention. Use 'all' to also remove PyTorch "
+             "(torch, torchvision, torchaudio). Asks before removing anything."
     )
     
     parser.add_argument(
@@ -5387,7 +5468,7 @@ Examples:
 
     # Check if any action was specified
     has_backup_action = args.backup or args.backup_restore or args.backup_clean is not None
-    has_main_action = install_requested or args.cleanup or args.run or upgrade_requested or show_installed_requested or args.dryrun
+    has_main_action = install_requested or args.cleanup is not None or args.run or upgrade_requested or show_installed_requested or args.dryrun
 
     if not (has_main_action or has_backup_action):
         parser.print_help()
@@ -5608,8 +5689,8 @@ Examples:
 
     success = True
 
-    if args.cleanup:
-        installer.cleanup_installation()
+    if args.cleanup is not None:
+        installer.cleanup_installation(include_pytorch=(args.cleanup == "all"))
 
     if install_requested:
         success = installer.install()

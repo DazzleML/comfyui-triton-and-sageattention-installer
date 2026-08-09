@@ -82,8 +82,11 @@ python comfyui_triton_sageattention.py --install --verbose
 # Custom ComfyUI location
 python comfyui_triton_sageattention.py --install --base-path C:\path\to\comfyui
 
-# Cleanup previous installation (removes PyTorch too -- asks for confirmation first)
+# Remove Triton and SageAttention (asks first; PyTorch is left alone)
 python comfyui_triton_sageattention.py --cleanup
+
+# ...or remove PyTorch as well
+python comfyui_triton_sageattention.py --cleanup all
 ```
 
 ### ComfyUI Portable Support

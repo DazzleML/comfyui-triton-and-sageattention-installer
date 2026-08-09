@@ -159,14 +159,45 @@ def test_cleanup_non_interactive_declines(installer):
     )
 
 
-def test_cleanup_confirmed_removes_the_known_set(installer, monkeypatch):
-    """Explicit, confirmed teardown legitimately removes the full stack."""
+def test_cleanup_default_leaves_pytorch_alone(installer, monkeypatch):
+    """A plain --cleanup removes the acceleration stack, NOT PyTorch.
+
+    These were one hardcoded list inherited from the original batch script, so
+    `--cleanup` removed torch too. The documented "clean slate reinstall" is
+    --cleanup then --install, and an --install can fail for reasons outside the
+    user's control (a missing upstream wheel is enough). That sequence could
+    leave someone with no PyTorch and no way back, since rollback only undoes
+    what the failed run itself installed.
+    """
     monkeypatch.setattr(ComfyUIInstaller, "_confirm", lambda self, q, **k: True)
     installer.base_path = Path("nonexistent-for-test")
     installer.cleanup_installation()
 
     removed = uninstalled(installer)
+    assert "sageattention" in removed and "triton-windows" in removed, removed
+    for survivor in ("torch", "torchvision", "torchaudio"):
+        assert survivor not in removed, (
+            f"a plain --cleanup removed {survivor}; PyTorch requires `--cleanup all`"
+        )
+
+
+def test_cleanup_all_removes_pytorch_too(installer, monkeypatch):
+    """`--cleanup all` is the explicit opt-in for a full teardown."""
+    monkeypatch.setattr(ComfyUIInstaller, "_confirm", lambda self, q, **k: True)
+    installer.base_path = Path("nonexistent-for-test")
+    installer.cleanup_installation(include_pytorch=True)
+
+    removed = uninstalled(installer)
     assert "torch" in removed and "sageattention" in removed, removed
+
+
+def test_cleanup_all_still_requires_consent(installer, monkeypatch):
+    """The opt-in does not bypass the prompt -- it is the more destructive path."""
+    monkeypatch.setattr(ComfyUIInstaller, "_confirm", lambda self, q, **k: False)
+    installer.base_path = Path("nonexistent-for-test")
+    installer.cleanup_installation(include_pytorch=True)
+
+    assert installer.handler.pip_uninstall.call_count == 0
 
 
 # ---------------------------------------------------------------------------
@@ -323,3 +354,114 @@ def test_rollback_removes_ours_before_restoring_theirs(installer):
 
     installer._rollback_failed_install()
     assert order == ["uninstall", "install"], order
+
+
+# ---------------------------------------------------------------------------
+# Telling the user PyTorch is missing after a failed install
+# ---------------------------------------------------------------------------
+
+def make_plan(cuda="130"):
+    from comfyui_triton_sageattention import InstallPlan
+    plan = InstallPlan()
+    plan.cuda_for_wheels = cuda
+    return plan
+
+
+def prepare_report(installer, torch_version=None, cuda="130"):
+    """Wire an installer for _report_missing_pytorch(); torch_version=None means absent."""
+    from comfyui_triton_sageattention import WindowsHandler
+    installer._restore_on_failure = {}
+    installer._current_plan = make_plan(cuda)
+    installer._get_installed_version = Mock(return_value=torch_version)
+    installer.handler.python_path = r"C:\scratch\venv\Scripts\python.exe"
+    installer.handler.get_pytorch_install_url = (
+        lambda c: WindowsHandler.get_pytorch_install_url(installer.handler, c)
+    )
+    installer.handler.pytorch_index_cuda = WindowsHandler.pytorch_index_cuda
+    installer.handler.PYTORCH_INDEX_ALIASES = WindowsHandler.PYTORCH_INDEX_ALIASES
+    return installer
+
+
+def test_missing_pytorch_is_reported_with_an_install_command(installer, capsys):
+    """"Nothing to roll back" alone reads as an all-clear to someone with no torch.
+
+    Reached identically from a fresh install that failed, from `--cleanup all`,
+    or from a venv that never had torch. The installer cannot tell those apart --
+    two separate invocations mean the packages are already absent by the time it
+    plans -- so it reports the end state rather than attributing a cause.
+    """
+    prepare_report(installer, torch_version=None)
+    installer._report_missing_pytorch()
+
+    out = capsys.readouterr().out
+    assert "no PyTorch" in out
+    assert "pip install" in out, "the user must get an actual command, not just bad news"
+    assert "torch>=2.5.0" in out
+    assert r"C:\scratch\venv\Scripts\python.exe" in out, "must target THEIR interpreter"
+    assert "--backup-restore" in out
+
+
+def test_missing_pytorch_uses_the_index_for_their_cuda(installer, capsys):
+    """The command has to point at the right wheel index or it is useless."""
+    prepare_report(installer, torch_version=None, cuda="130")
+    installer._report_missing_pytorch()
+
+    out = capsys.readouterr().out
+    assert "download.pytorch.org/whl/cu130" in out, out
+
+
+def test_missing_pytorch_offers_pytorch_org_as_a_fallback(installer, capsys):
+    """When OUR index choice is what failed, repeating it back helps nobody.
+
+    The cu132 torchaudio gap fixed in 0.8.13 is exactly that case.
+    """
+    prepare_report(installer, torch_version=None)
+    installer._report_missing_pytorch()
+
+    assert "pytorch.org/get-started" in capsys.readouterr().out
+
+
+def test_no_cuda_detected_links_the_toolkit_and_warns_about_cpu_builds(installer, capsys):
+    """Without CUDA the command installs a CPU-only build, which is useless here.
+
+    SageAttention requires CUDA. The README badge has linked to the toolkit
+    since the first release; the installer never did.
+    """
+    prepare_report(installer, torch_version=None, cuda="cpu")
+    installer._report_missing_pytorch()
+
+    out = capsys.readouterr().out
+    assert "CPU-only" in out
+    assert "developer.nvidia.com/cuda-downloads" in out, out
+
+
+def test_cuda_present_does_not_show_the_cpu_warning(installer, capsys):
+    """The toolkit note must not fire when CUDA was found -- it would be wrong."""
+    prepare_report(installer, torch_version=None, cuda="130")
+    out = capsys.readouterr().out
+    installer._report_missing_pytorch()
+
+    out = capsys.readouterr().out
+    assert "developer.nvidia.com" not in out
+    assert "CPU-only" not in out
+
+
+def test_nothing_reported_when_pytorch_is_present(installer, capsys):
+    """A failure with torch installed was a failure somewhere else. Stay quiet."""
+    prepare_report(installer, torch_version="2.13.0+cu130")
+    installer._report_missing_pytorch()
+
+    assert "no PyTorch" not in capsys.readouterr().out
+
+
+def test_restore_path_is_not_duplicated(installer, capsys):
+    """The CPU->CUDA restore already named exact versions -- do not talk over it.
+
+    That guidance is strictly better than a generic torch>=2.5.0, so this method
+    stays silent when it has run.
+    """
+    prepare_report(installer, torch_version=None)
+    installer._restore_on_failure = {"torch": "2.5.1+cpu"}
+    installer._report_missing_pytorch()
+
+    assert "no PyTorch" not in capsys.readouterr().out

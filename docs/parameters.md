@@ -14,7 +14,7 @@ python comfyui_triton_sageattention.py [ACTION] [OPTIONS]
 |------|-------------|
 | `--install [MODE]` | Install Triton and SageAttention. Optional `discover` mode for interactive selection. |
 | `--upgrade [MODE]` | Upgrade existing SageAttention installation. Optional `discover` mode. |
-| `--cleanup` | Remove the Triton/SageAttention/PyTorch packages. Lists what will go and asks for confirmation; declines under `--non-interactive`. |
+| `--cleanup [MODE]` | Remove Triton and SageAttention. Use `--cleanup all` to also remove PyTorch, torchvision and torchaudio. Lists what will go and asks for confirmation; declines under `--non-interactive`. |
 | `--run` | Run ComfyUI with SageAttention enabled |
 | `--show-installed [MODE]` | Display installation info (see modes below) |
 | `--dryrun` | Preview changes without executing (requires `--install` or `--upgrade`) |
@@ -234,10 +234,16 @@ python comfyui_triton_sageattention.py --cleanup
 python comfyui_triton_sageattention.py --install
 ```
 
-`--cleanup` uninstalls PyTorch along with Triton and SageAttention, so anything else in
-that environment depending on torch will stop working. It prints the list and asks
-before removing anything, and under `--non-interactive` it declines rather than
-assuming consent.
+`--cleanup` removes Triton and SageAttention. PyTorch is left alone, because it is a
+multi-gigabyte dependency that everything else in a ComfyUI environment imports.
+
+`--cleanup all` additionally removes `torch`, `torchvision` and `torchaudio`. Be
+deliberate about it: if the reinstall afterwards fails for any reason -- a missing
+upstream wheel is enough -- you are left with no PyTorch, and the installer cannot
+put back something it did not remove. Take a `--backup` first.
+
+Both forms print the list and ask before removing anything, and under
+`--non-interactive` they decline rather than assuming consent.
 
 This is separate from what happens when an install *fails*: that only rolls back
 packages the failed run itself installed, never ones that were already there.

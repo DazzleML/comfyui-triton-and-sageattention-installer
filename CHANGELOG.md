@@ -5,6 +5,20 @@ All notable changes to the ComfyUI Triton and SageAttention installer will be do
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.14](https://github.com/DazzleML/comfyui-triton-and-sageattention-installer/compare/v0.8.13...v0.8.14) - 2026-08-09
+
+Stops `--cleanup` from removing PyTorch unless you ask it to, and tells you how to get PyTorch back if an install leaves you without it.
+
+### Added
+- A failed install now says so when the environment has no PyTorch, instead of ending on "Nothing to roll back". That line is accurate but reads as an all-clear, and it is the last thing on screen whether you arrived there from a fresh install that failed, a `--cleanup all`, or anything else — the installer cannot tell those apart, because by the time it looks the packages are already gone either way. It now prints the exact `pip install` command for your CUDA version, a link to [pytorch.org](https://pytorch.org/get-started/locally/) for when our own index choice is what failed, and a pointer to `--backup-restore`.
+- When no CUDA toolkit is detected, that guidance also notes the command would install a CPU-only build and links to the [CUDA downloads](https://developer.nvidia.com/cuda-downloads) page. The README badge has always linked there; the installer never did.
+
+### Changed
+- `--cleanup` now removes Triton and SageAttention only. PyTorch, torchvision and torchaudio are left alone unless you pass `--cleanup all`. The two were one hardcoded list inherited from the original batch script, so the documented "clean slate reinstall" (`--cleanup` then `--install`) deleted a multi-gigabyte shared dependency and relied on the reinstall succeeding — and a reinstall can fail for reasons outside your control, as 0.8.13 showed. Both forms still list what they will remove and ask first.
+
+### Testing
+- Tests 254 → 265.
+
 ## [0.8.13](https://github.com/DazzleML/comfyui-triton-and-sageattention-installer/compare/v0.8.12...v0.8.13) - 2026-08-09
 
 Fixes a crash on non-English Windows, and several paths where a failed or interrupted install could remove packages it never installed.
