@@ -52,3 +52,29 @@ jobs:
         echo "    print(f'Import failed: {e}')" >> test_import.py
         echo "    exit(1)" >> test_import.py
         python test_import.py
+
+  # The unit suite runs on the primary platform (Windows) and the ComfyUI
+  # Portable Python (3.12) only. It is deliberately NOT part of the matrix
+  # above: the tests assert Windows behavior (e.g. the "triton-windows"
+  # package name, where non-Windows selects "triton"), so adding them to the
+  # ubuntu legs would go permanently red. Expanding coverage to other
+  # OS/Python combinations is tracked as a separate task -- do not fold this
+  # job into the matrix without running the suite there first.
+  unit-tests:
+    runs-on: windows-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Run unit tests
+      run: |
+        python -m pytest tests/unit/ -v

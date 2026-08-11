@@ -5,6 +5,25 @@ All notable changes to the ComfyUI Triton and SageAttention installer will be do
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.15](https://github.com/DazzleML/comfyui-triton-and-sageattention-installer/compare/v0.8.14...v0.8.15) - 2026-08-10
+
+Fixes `--upgrade` proposing a Triton built for a newer PyTorch and then never performing the upgrade it claimed, and adds a self-check that compares what the installer said it would do against what actually happened.
+
+### Fixed
+- `--upgrade --dryrun` proposed upgrading Triton across a PyTorch pairing boundary (e.g. 3.7.1 on PyTorch 2.10, a Triton built for 2.12), while the real run refused and skipped — the claim repeated forever and was never performed. Both halves were wrong: the compatibility table's newest tier had no upper bound, and the execution step only honored the plan's KEEP decision, re-deciding everything else itself. Each PyTorch minor now maps to exactly one Triton minor, [as upstream states](https://github.com/woct0rdho/triton-windows#3-pytorch), and execution performs whatever the plan decided.
+- The upgrade check asked pip for the newest Triton overall rather than the newest compatible one, so legitimate compatible updates (e.g. a new 3.6.0 post-build on PyTorch 2.10) would never have been offered once the pairing table was corrected. The check now asks within the compatible range, and includes pre-releases to match how installation actually runs.
+- On environments without the `packaging` library (some ComfyUI Portable setups), the compatibility filter silently allowed any proposed upgrade. It now falls back to a built-in comparison, and when it cannot verify a candidate it simply doesn't propose it (the plan says KEEP and nothing is changed). This only governs what the installer itself proposes — upgrading Triton yourself with pip remains yours to do, and the installer never reverts a Triton you installed: unknown-to-us combinations are deliberately left alone.
+- `--with-custom-nodes --dryrun` listed four custom-node entries, two of them duplicates under inconsistent names; the real run listed two. The preview now shows the same two rows the install acts on.
+
+### Added
+- Every install and upgrade now ends with a post-install verification block comparing the plan against the resulting environment: components marked KEEP must be unchanged, planned changes must have actually happened, and pip/setuptools must be untouched unless the plan said otherwise. It changes nothing and cannot fail an install; if it finds a mismatch it prints a `[DEVIATION]` block designed to be pasted into a bug report, and the final status line says so instead of `Success!`.
+- CI now runs the unit test suite (Windows, Python 3.12) on every push and pull request. It previously installed the test runner and never invoked it.
+
+### Testing
+- Verified on the machine that hit the original bug: preview and real run now agree, and the verification block reports zero deviations.
+- The verifier's tests were mutation-audited: 12 deliberate bugs introduced, all 12 caught (one after its test was strengthened).
+- Tests 265 → 317.
+
 ## [0.8.14](https://github.com/DazzleML/comfyui-triton-and-sageattention-installer/compare/v0.8.13...v0.8.14) - 2026-08-09
 
 Stops `--cleanup` from removing PyTorch unless you ask it to, and tells you how to get PyTorch back if an install leaves you without it.

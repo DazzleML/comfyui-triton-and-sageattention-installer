@@ -115,9 +115,12 @@ Wheels are sourced from [woct0rdho's SageAttention releases](https://github.com/
 
 The installer automatically selects a compatible Triton version based on your PyTorch version. This ensures `torch.compile` works correctly.
 
+Each pairing is one Triton minor wide, following upstream's guidance: "Each PyTorch minor version is only guaranteed to work with a specific Triton minor version."
+
 | PyTorch | Triton Version | Notes |
 |---------|----------------|-------|
-| >= 2.10 | 3.6.x | Current stable PyTorch |
+| >= 2.12 | 3.7.x | Derived from PyTorch's own triton pins (2.12.0 -> 3.7.0, 2.12.1/2.13 -> 3.7.1) |
+| 2.10.x - 2.11.x | 3.6.x | Stated in the triton-windows README |
 | 2.9.x | 3.5.x | |
 | 2.8.x | 3.4.x | |
 | 2.7.x | 3.3.x | |
@@ -126,4 +129,4 @@ The installer automatically selects a compatible Triton version based on your Py
 
 If you see a Triton/PyTorch compatibility warning in `--show-installed`, run the suggested fix command.
 
-Reference: [triton-windows compatibility](https://github.com/woct0rdho/triton-windows/issues/158)
+References: [triton-windows README](https://github.com/woct0rdho/triton-windows#3-pytorch) · [triton-windows issue #158](https://github.com/woct0rdho/triton-windows/issues/158)

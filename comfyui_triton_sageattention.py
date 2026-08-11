@@ -43,7 +43,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 # Version information
-__version__ = "0.8.14"
+__version__ = "0.8.15"
 
 
 def parse_sage_version(version_str: str) -> Tuple[Optional[int], Optional[str]]:
@@ -157,6 +157,14 @@ class EnvironmentState:
     # Other components
     triton_version: Optional[str] = None      # e.g., "3.5.1" or None
     sageattention_version: Optional[str] = None  # e.g., "2.2.0.post3" or None
+
+    # Build tooling. Probed so post-install verification can prove pip and
+    # setuptools were NOT touched when the plan did not authorize touching
+    # them -- on 2026-08-10 a phantom Triton UPGRADE made plan.has_changes()
+    # true, which authorized a real setuptools 83->84 replacement the preview
+    # never mentioned.
+    pip_version: Optional[str] = None         # e.g., "26.2.1" or None
+    setuptools_version: Optional[str] = None  # e.g., "83.0.0" or None
 
     # Environment info
     python_version: str = ""                  # e.g., "3.12.0"
@@ -2911,26 +2919,36 @@ class ComfyUIInstaller(ConfirmMixin):
         return False
     
     def install_triton(self):
-        """Install or fix Triton with version constraint based on PyTorch compatibility.
+        """Install, upgrade, or fix Triton per the InstallPlan.
 
-        Triton/PyTorch version compatibility (triton-windows):
-        - Triton 3.6.x requires PyTorch >= 2.10
-        - Triton 3.5.x requires PyTorch >= 2.9
-        - Triton 3.4.x requires PyTorch >= 2.8
-        - Triton 3.3.x requires PyTorch >= 2.7
-        - Triton 3.2.x requires PyTorch >= 2.6
+        Uses the InstallPlan as single source of truth for what action to take,
+        dispatching on EVERY action value -- not guarding on KEEP alone. The
+        v0.8.14 phantom upgrade came from exactly that asymmetry: the plan said
+        UPGRADE, this method's KEEP-only guard fell through to a pre-v0.8.6
+        decision block that re-decided "compatible - skipping", and the preview
+        claimed an upgrade forever that execution never performed.
 
-        If Triton is already installed but incompatible with PyTorch, it will be
-        uninstalled and reinstalled with the correct version constraint.
+        Actions:
+        - KEEP:      Skip (compatible Triton already installed)
+        - INSTALL:   Fresh installation (no Triton present)
+        - UPGRADE:   Update available within the version tier
+        - FIX:       Remove incompatible Triton, install a compatible one
+        - REINSTALL: --force reinstall over a compatible install
 
-        See: https://github.com/woct0rdho/triton-windows/issues/158
+        The version constraint is NOT read from the plan's display strings and
+        NOT re-decided here. It is the plan's explicitly deferred value
+        ("determined after PyTorch installs"): execution resolves it exactly
+        once, with the same resolver the planner names
+        (_get_triton_version_constraint), against the torch now present.
+
+        Tier table lives in _get_triton_version_constraint; see the
+        triton-windows README ("Each PyTorch minor version is only guaranteed
+        to work with a specific Triton minor version") and their issue #158.
         """
-        # Consult the plan (single source of truth for install decisions)
+        # Get the planned action from InstallPlan (single source of truth)
+        action = None
         if hasattr(self, '_current_plan') and self._current_plan:
             action = self._current_plan.get_action("Triton")
-            if action and action.action == "KEEP":
-                print(f"Triton {action.current_version} is compatible with PyTorch - skipping")
-                return
 
         # Determine base package name
         if platform.system() == "Windows":
@@ -2938,32 +2956,38 @@ class ComfyUIInstaller(ConfirmMixin):
         else:
             base_package = "triton"
 
-        # Get PyTorch version and determine compatible Triton constraint
-        torch_ver = self._get_torch_version()
-        constraint = self._get_triton_version_constraint(torch_ver)
+        if action:
+            if action.action == "KEEP":
+                print(f"Triton {action.current_version} is compatible with PyTorch - skipping")
+                return
 
-        # Check if Triton is already installed
-        current_triton = self._get_installed_triton_version()
-
-        if current_triton:
-            is_compat, compat_msg = self._check_triton_pytorch_compatibility(current_triton, torch_ver)
-
-            if is_compat:
-                if not self.force:
-                    print(f"Triton {current_triton} is compatible with PyTorch {torch_ver} - skipping")
-                    return
-                else:
-                    print(f"Triton {current_triton} is compatible, but --force specified - reinstalling")
-            else:
-                # Incompatible - need to fix
-                print(f"Fixing Triton compatibility: {compat_msg}")
-                print(f"  Removing incompatible Triton {current_triton}...")
+            if action.action == "REINSTALL":
+                print(f"Triton {action.current_version} is compatible, but --force specified - reinstalling")
+            elif action.action == "FIX":
+                print(f"Fixing Triton compatibility: {action.reason}")
+                print(f"  Removing incompatible Triton {action.current_version}...")
                 try:
                     self.handler.pip_uninstall([base_package])
                 except Exception as e:
                     self.logger.warning(f"Could not uninstall {base_package}: {e}")
+            elif action.action == "UPGRADE":
+                print(f"Upgrading Triton {action.current_version} -> {action.target_version}...")
+            else:  # INSTALL
+                print("Installing Triton...")
         else:
+            # Called without a plan (not reachable from install(), which always
+            # builds one). Deciding here is how the phantom happened, so decide
+            # nothing: install only if Triton is absent, otherwise leave the
+            # working environment alone.
+            if self._get_installed_triton_version():
+                print("Triton already installed and no plan available - leaving it alone")
+                return
             print("Installing Triton...")
+
+        # Resolve the deferred constraint against the torch that is now
+        # actually present (install_pytorch has already run by this point).
+        torch_ver = self._get_torch_version()
+        constraint = self._get_triton_version_constraint(torch_ver)
 
         # Install with constraint
         if constraint:
@@ -3116,12 +3140,33 @@ class ComfyUIInstaller(ConfirmMixin):
     def _get_triton_version_constraint(self, torch_ver: str) -> str:
         """Get compatible triton-windows version constraint for PyTorch version.
 
-        Based on https://github.com/woct0rdho/triton-windows compatibility:
-        - Triton 3.6.x requires PyTorch >= 2.10
-        - Triton 3.5.x requires PyTorch >= 2.9
-        - Triton 3.4.x requires PyTorch >= 2.8
-        - Triton 3.3.x requires PyTorch >= 2.7
-        - Triton 3.2.x requires PyTorch >= 2.6
+        Every tier is ONE Triton minor wide. The woct0rdho/triton-windows README
+        states: "Each PyTorch minor version is only guaranteed to work with a
+        specific Triton minor version" (table ends 2.10 -> 3.6; see also their
+        issue #158). An earlier open-ended tier (">=3.6,<4" for torch >= 2.10)
+        asserted future compatibility nobody had confirmed, and on 2026-08-10 it
+        made the plan propose Triton 3.7.1 -- a torch-2.12 pairing -- for a
+        torch 2.10 environment.
+
+        Evidence grade per tier (keep these honest when adding tiers):
+        - CONFIRMED: stated by upstream (README/issue) for the Windows fork
+        - INFERRED:  derived from torch's own PyPI triton pins (Linux markers),
+                     the best evidence available until upstream states it
+
+        Rule for future edits: a fresh INSTALL may use an INFERRED tier (the
+        chooser cannot abstain), but never widen a tier past one minor, and
+        never add a FIX-triggering incompatibility on INFERRED evidence --
+        FIX mutates a working install and requires CONFIRMED incompatibility.
+
+        Tiers:
+        - torch >= 2.12 -> Triton 3.7.x  (INFERRED: torch 2.12.0 pins
+          triton==3.7.0; 2.12.1 and 2.13.0 pin 3.7.1)
+        - torch >= 2.10 -> Triton 3.6.x  (CONFIRMED: upstream README table;
+          torch 2.10.0 and 2.11.0 also pin triton==3.6.0)
+        - torch >= 2.9  -> Triton 3.5.x  (CONFIRMED)
+        - torch >= 2.8  -> Triton 3.4.x  (CONFIRMED)
+        - torch >= 2.7  -> Triton 3.3.x  (CONFIRMED)
+        - torch >= 2.6  -> Triton 3.2.x  (CONFIRMED)
 
         Args:
             torch_ver: PyTorch version string (e.g., "2.7.0", "2.7.0+cu128")
@@ -3135,8 +3180,10 @@ class ComfyUIInstaller(ConfirmMixin):
             # Handle "+cu128" suffix in minor version
             minor = int(parts[1].split("+")[0])
 
-            if (major, minor) >= (2, 10):
-                return ">=3.6,<4"
+            if (major, minor) >= (2, 12):
+                return ">=3.7,<3.8"
+            elif (major, minor) >= (2, 10):
+                return ">=3.6,<3.7"
             elif (major, minor) >= (2, 9):
                 return ">=3.5,<3.6"
             elif (major, minor) >= (2, 8):
@@ -3230,11 +3277,30 @@ class ComfyUIInstaller(ConfirmMixin):
         except (ValueError, IndexError):
             return True, "Unknown (could not parse versions)"
 
-    def _check_package_update_available(self, package: str) -> Tuple[bool, Optional[str]]:
+    def _check_package_update_available(self, package: str, spec: str = "") -> Tuple[bool, Optional[str]]:
         """Check if a package has an update available using pip --dry-run.
+
+        The probe must be the same instrument execution uses, or the plan and
+        the install disagree at the source. Two consequences:
+
+        - `spec` carries the domain constraint (e.g. ">=3.6,<3.7") INTO the
+          probe. Unconstrained, pip only ever reports the global latest; after
+          the one-minor Triton tiers that latest is usually out-of-tier, the
+          filter rejects it, and legitimate within-tier updates (3.6.0.postN)
+          become unreachable -- a silent freeze, not an error.
+        - `--pre` matches execution's `pip install -U --pre` (install_triton).
+          Without it, a pre-release-only newer version would be installed by
+          execution yet never proposed by the plan.
+
+        `spec` and `package` stay separate parameters because the version-parse
+        regex is built from the package NAME; passing "triton-windows>=3.6,<3.7"
+        as `package` makes the regex unmatchable, which returns (True, None) --
+        and the plan layer treats that as no update at all.
 
         Args:
             package: Package name (e.g., "triton-windows")
+            spec: Optional pip version specifier appended to the requirement
+                  (e.g., ">=3.6,<3.7")
 
         Returns:
             Tuple of (has_update, new_version or None)
@@ -3243,7 +3309,7 @@ class ComfyUIInstaller(ConfirmMixin):
             # pip install --dry-run --upgrade shows what would be installed
             result = self.handler.run_command([
                 str(self.handler.python_path), "-m", "pip", "install",
-                "--dry-run", "--upgrade", package
+                "--dry-run", "--upgrade", "--pre", f"{package}{spec}"
             ], capture_output=True)
 
             output = result.stdout + result.stderr if result.stderr else result.stdout
@@ -3265,6 +3331,56 @@ class ComfyUIInstaller(ConfirmMixin):
             return False, None
         except Exception:
             return False, None
+
+    def _version_satisfies_constraint(self, version: str, constraint: str) -> bool:
+        """True if `version` satisfies the pip-style `constraint`.
+
+        Prefers `packaging` when available; falls back to a no-dependency
+        (major, minor) tuple comparison when it is not -- `packaging` is not a
+        declared runtime dependency and a ComfyUI Portable embedded Python may
+        not have it. The previous inline check `pass`ed on ImportError, leaving
+        the upgrade proposal APPROVED: the constraint filter silently
+        self-disabled in the permissive direction on exactly the environments
+        this tool most targets. This helper fails CLOSED instead -- an
+        unparseable version or constraint blocks the proposal, and the plan
+        then says KEEP, which cannot break a working install.
+
+        The fallback is exact for this project's constraints: every tier
+        emitted by _get_triton_version_constraint() is a conjunction of
+        >=X.Y / <X.Y bounds, and post-suffixes live in parts[2+], so the
+        (major, minor) comparison decides correctly.
+        """
+        if not constraint:
+            return True
+        try:
+            from packaging.version import Version
+            from packaging.specifiers import SpecifierSet
+            return Version(version) in SpecifierSet(constraint)
+        except ImportError:
+            pass  # packaging unavailable: use the no-dependency comparison
+        except Exception:
+            return False  # packaging present but could not parse: fail closed
+
+        try:
+            v_parts = version.split(".")
+            v = (int(v_parts[0]), int(v_parts[1].split("+")[0]))
+            for clause in constraint.split(","):
+                clause = clause.strip()
+                if clause.startswith(">="):
+                    op, bound = ">=", clause[2:]
+                elif clause.startswith("<"):
+                    op, bound = "<", clause[1:]
+                else:
+                    return False  # unknown operator: fail closed
+                b_parts = bound.split(".")
+                b = (int(b_parts[0]), int(b_parts[1]) if len(b_parts) > 1 else 0)
+                if op == ">=" and not v >= b:
+                    return False
+                if op == "<" and not v < b:
+                    return False
+            return True
+        except (ValueError, IndexError):
+            return False  # fail closed
 
     def _format_cuda_version(self, cuda_code: str) -> str:
         """Format CUDA version code to human-readable format.
@@ -3739,7 +3855,154 @@ class ComfyUIInstaller(ConfirmMixin):
         # Get SageAttention version
         state.sageattention_version = self._get_installed_sageattention_version()
 
+        # Get build tooling versions (for post-install verification)
+        state.pip_version = self._get_installed_version("pip")
+        state.setuptools_version = self._get_installed_version("setuptools")
+
         return state
+
+    # Plan components with an EnvironmentState observable -- the verifier's
+    # scope fence. Rows outside this map (e.g. custom nodes) are skipped:
+    # there is no post-state field to check them against.
+    _VERIFIABLE_COMPONENTS = {
+        "PyTorch": "torch_version",
+        "Triton": "triton_version",
+        "SageAttention": "sageattention_version",
+    }
+
+    def _verify_install_outcome(self, plan: "InstallPlan",
+                                sage_attention_failed: bool = False) -> int:
+        """Compare the plan's claims to the environment after execution.
+
+        Report-only: this method changes nothing, and it can never fail the
+        install -- every probe and comparison is fenced. It exists because all
+        three shipped plan/execute divergences (v0.8.6, v0.8.12, v0.8.14) were
+        found by accident on a maintainer's machine; this makes every real run
+        a detector.
+
+        Checks, per plan row (the six-action matrix):
+        - KEEP:      post == pre. A change here is worded as observation, not
+                     attribution -- pip can legitimately move a KEEP component
+                     while resolving another step's requirements.
+        - INSTALL:   post is not None.
+        - UPGRADE:   post != pre (catches the v0.8.14 phantom: claimed change
+                     that never happened).
+        - FIX:       post != pre.
+        - DOWNGRADE: post != pre. Target equality is deliberately NOT checked:
+                     installed SA wheel versions carry local tags
+                     ("2.2.0+cu130torch...post6") that never string-equal the
+                     plan's bare target, and the plan's DOWNGRADE target is
+                     itself decorated ("1.0.6 - exact").
+        - REINSTALL: post is not None -- presence, not equality. Same version
+                     back is the expected outcome; absence means the uninstall
+                     succeeded and the reinstall did not.
+        Plus: pip/setuptools unchanged unless plan.build_tools_upgrade_needed.
+
+        Known blind spot (do not oversell): same-version churn -- a KEEP that
+        was uninstalled and reinstalled at the same version ends at post == pre
+        and passes. Only a mutation recorder or execution tests can see that.
+
+        Returns the number of deviations (0 = every claim held).
+        """
+        try:
+            post = self._detect_current_environment()
+        except Exception as e:
+            self.logger.warning(f"Post-install verification could not probe the environment: {e}")
+            return 0
+
+        results = []      # (status, text) tuples; status is "OK" or "DEVIATION"
+
+        def _ok(text):
+            results.append(("OK", text))
+
+        def _deviation(text):
+            results.append(("DEVIATION", text))
+            self.logger.warning(f"[DEVIATION] {text}")
+
+        try:
+            for action in plan.actions:
+                field = self._VERIFIABLE_COMPONENTS.get(action.component)
+                if field is None:
+                    continue
+                pre = getattr(plan.current, field)
+                post_v = getattr(post, field)
+                name = action.component
+                kind = action.action
+
+                # SageAttention failure already warned loudly and (with consent)
+                # the run continued without it -- an absent SA is the explained
+                # outcome, not a new finding.
+                if (name == "SageAttention" and sage_attention_failed
+                        and kind != "KEEP"):
+                    continue
+
+                if kind == "KEEP":
+                    if post_v == pre:
+                        _ok(f"{name:<14} KEEP      {pre} (unchanged)")
+                    else:
+                        _deviation(
+                            f"{name}: plan said KEEP {pre}, environment now has "
+                            f"{post_v} (changed outside the plan -- possibly by pip "
+                            f"dependency resolution during another step of this install)"
+                        )
+                elif kind in ("UPGRADE", "FIX", "DOWNGRADE"):
+                    if post_v != pre:
+                        _ok(f"{name:<14} {kind:<9} {pre} -> {post_v}")
+                    else:
+                        _deviation(
+                            f"{name}: plan said {kind} {pre} -> "
+                            f"{action.target_version}, environment still has "
+                            f"{post_v} (the planned change did not happen)"
+                        )
+                elif kind in ("INSTALL", "REINSTALL"):
+                    if post_v is not None:
+                        _ok(f"{name:<14} {kind:<9} {post_v} (present)")
+                    else:
+                        _deviation(
+                            f"{name}: plan said {kind}, but the package is not "
+                            f"present afterwards"
+                        )
+
+            # Build tooling: unchanged unless the plan authorized touching it.
+            # Skipped when the pre-probe failed (None) -- no baseline to hold.
+            if not plan.build_tools_upgrade_needed:
+                changed = []
+                for tool, field in (("pip", "pip_version"),
+                                    ("setuptools", "setuptools_version")):
+                    pre = getattr(plan.current, field)
+                    post_v = getattr(post, field)
+                    if pre is not None and post_v is not None and pre != post_v:
+                        changed.append(f"{tool} {pre} -> {post_v}")
+                if changed:
+                    _deviation(
+                        f"build tools: plan authorized no pip/setuptools changes, "
+                        f"but {', '.join(changed)}"
+                    )
+                else:
+                    _ok(f"{'build tools':<14} pip/setuptools unchanged (not authorized)")
+        except Exception as e:
+            self.logger.warning(f"Post-install verification aborted mid-check: {e}")
+
+        if not results:
+            return 0
+
+        deviations = sum(1 for status, _ in results if status == "DEVIATION")
+        print()
+        print("-" * 70)
+        print("Post-install verification (plan vs. environment)")
+        print("-" * 70)
+        for status, text in results:
+            tag = f"[{status}]"
+            print(f"  {tag:<12}{text}")
+        print()
+        checks = len(results) - deviations
+        print(f"  Result: {checks} check(s) passed, {deviations} deviation(s).")
+        if deviations:
+            print("  This check changes nothing; it only compares. If you see")
+            print("  [DEVIATION], please copy this block into a new issue:")
+            print("  https://github.com/DazzleML/comfyui-triton-and-sageattention-installer/issues")
+        print("-" * 70)
+        return deviations
 
     def _get_cuda_for_wheels(self, state: EnvironmentState) -> str:
         """Determine which CUDA version to use for wheel matching.
@@ -3916,26 +4179,18 @@ class ComfyUIInstaller(ConfirmMixin):
 
         # Compatible - check for upgrades if requested
         if self.upgrade:
-            has_update, new_version = self._check_package_update_available(triton_package)
+            # The constraint rides INTO the probe. Unconstrained, pip only ever
+            # reports the global latest; with one-minor tiers that latest is
+            # usually out-of-tier, the filter below rejects it, and legitimate
+            # within-tier updates (3.6.0.postN) silently become unreachable.
+            has_update, new_version = self._check_package_update_available(
+                triton_package, constraint
+            )
             if has_update and new_version:
-                # Verify the proposed upgrade satisfies our PyTorch-Triton constraint
-                # pip reports latest available, but we must not upgrade to an
-                # incompatible version (e.g., Triton 3.6 with PyTorch 2.7)
-                upgrade_ok = True
-                if constraint and new_version:
-                    try:
-                        # Imported inside the try: `packaging` is not a declared
-                        # runtime dependency, and a ComfyUI Portable embedded
-                        # Python may not have it. An ImportError here would
-                        # otherwise propagate out of plan_installation().
-                        from packaging.version import Version
-                        from packaging.specifiers import SpecifierSet
-                        if not Version(new_version) in SpecifierSet(constraint):
-                            upgrade_ok = False
-                    except Exception:
-                        pass  # Can't import or can't parse: don't block the upgrade
-
-                if upgrade_ok:
+                # Belt over the probe's braces: verify the proposal satisfies
+                # the PyTorch-Triton constraint even though the probe was
+                # constrained. Fails closed (see _version_satisfies_constraint).
+                if self._version_satisfies_constraint(new_version, constraint):
                     return ComponentAction(
                         component="Triton",
                         action="UPGRADE",
@@ -4512,20 +4767,13 @@ class ComfyUIInstaller(ConfirmMixin):
         # Generate the installation plan (single source of truth)
         plan = self.plan_installation()
 
-        # Add custom nodes to actions if requested (not part of core plan)
-        if self.with_custom_nodes:
-            plan.actions.append(ComponentAction(
-                component="VideoHelperSuite",
-                action="INSTALL",
-                target_version="latest",
-                reason="Custom node for video encoding"
-            ))
-            plan.actions.append(ComponentAction(
-                component="DazzleNodes",
-                action="INSTALL",
-                target_version="latest",
-                reason="Custom node collection"
-            ))
+        # Custom-node rows come from plan_installation() itself (NODE_PRESETS).
+        # A vestigial block here used to append two MORE rows -- one an exact
+        # duplicate ("DazzleNodes"), one under a name existing nowhere else
+        # ("VideoHelperSuite" vs the plan's "ComfyUI-VideoHelperSuite") -- so
+        # --with-custom-nodes --dryrun showed four rows where --install showed
+        # two. Dual renderers invent their own rows; the plan is the only row
+        # source (v0.8.15).
 
         # Display the plan (without footer - we add Triton compat section first)
         self._display_plan(plan, show_footer=False)
@@ -5215,11 +5463,26 @@ class ComfyUIInstaller(ConfirmMixin):
             
             # Step 8: Create run script
             self.create_run_script(cuda_version)
-            
+
+            # Step 9: Post-install verification (report-only; can never fail
+            # the install). Compares what the plan claimed against what the
+            # environment actually contains now.
+            deviations = 0
+            try:
+                deviations = self._verify_install_outcome(
+                    self._current_plan, sage_attention_failed
+                )
+            except Exception as e:
+                self.logger.warning(f"Post-install verification could not run: {e}")
+
             if sage_attention_failed:
                 print("\nWARNING: Installation completed with warnings!")
                 print("WARNING: SageAttention could not be installed. See error details above.")
                 print("WARNING: You can try installing it manually later or use ComfyUI without it.")
+            elif deviations:
+                # An unqualified "Success!" above evidence that the plan was
+                # contradicted would be this project's original sin in miniature.
+                print(f"\nCompleted -- {deviations} verification deviation(s) (see [DEVIATION] above)")
             else:
                 print("\nSuccess!")
             

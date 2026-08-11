@@ -930,5 +930,183 @@ class TestCpuToCudaSwitch:
             f"Reason must contain 'CPU-only' for uninstall detection. Got: {pytorch_action.reason}"
 
 
+# =============================================================================
+# TRITON CONSTRAINT TIER TESTS (v0.8.15)
+# =============================================================================
+
+class TestTritonConstraintTiers:
+    """The constraint table must be one Triton minor wide per PyTorch minor.
+
+    Upstream (woct0rdho/triton-windows README): "Each PyTorch minor version is
+    only guaranteed to work with a specific Triton minor version" -- table ends
+    2.10 -> 3.6. The old ">=3.6,<4" tier for torch >= 2.10 asserted future
+    compatibility nobody had confirmed; on 2026-08-10 it made the plan propose
+    Triton 3.7.1 (a torch-2.12 pairing) for a torch 2.10 environment.
+
+    Evidence grades: 2.10 -> 3.6 is CONFIRMED (upstream README); 2.12+ -> 3.7
+    is INFERRED (torch's own PyPI pins: 2.12.0 -> triton 3.7.0,
+    2.12.1/2.13.0 -> 3.7.1, Linux markers).
+    """
+
+    @pytest.mark.parametrize("torch_ver,expected", [
+        # New tiers (red before the v0.8.15 fix)
+        ("2.10.0", ">=3.6,<3.7"),
+        ("2.10.0+cu130", ">=3.6,<3.7"),
+        ("2.11.5", ">=3.6,<3.7"),
+        ("2.12.0", ">=3.7,<3.8"),
+        ("2.12.1", ">=3.7,<3.8"),
+        ("2.13.0+cu130", ">=3.7,<3.8"),
+        # Unknown future torch falls into the newest tier (best available
+        # evidence -- the fresh-install chooser cannot abstain)
+        ("2.14.0", ">=3.7,<3.8"),
+        # Boundary preservation (green before and after)
+        ("2.9.1", ">=3.5,<3.6"),
+        ("2.8.0", ">=3.4,<3.5"),
+        ("2.7.0+cu128", ">=3.3,<3.4"),
+        ("2.6.0", ">=3.2,<3.3"),
+        ("2.5.1", "<3.2"),
+    ])
+    def test_tier_is_one_minor_wide(self, mock_installer, torch_ver, expected):
+        assert mock_installer._get_triton_version_constraint(torch_ver) == expected
+
+    def test_unparseable_torch_yields_no_constraint(self, mock_installer):
+        """Unchanged behavior: garbage in, no constraint out."""
+        assert mock_installer._get_triton_version_constraint("garbage") == ""
+
+
+# =============================================================================
+# UPGRADE PROBE TESTS (v0.8.15)
+# =============================================================================
+
+def _emulate_pip_dry_run(installer, recorded):
+    """Layer a pip --dry-run emulator over setup_full_mock's run_command.
+
+    Emulates the semantics verified live against real pip: a CONSTRAINED
+    requirement is resolved within its range; an unconstrained one reports the
+    global latest (here 3.7.1.post27, out-of-tier for torch 2.10).
+    """
+    original = installer.handler.run_command.side_effect
+
+    def with_probe(cmd, capture_output=False, check=True):
+        cmd_strs = [str(c) for c in cmd]
+        if "--dry-run" in cmd_strs:
+            recorded.append(cmd_strs)
+            req = next(c for c in cmd_strs if "triton-windows" in c)
+            if ">=3.6,<3.7" in req:
+                return Mock(stdout="Would install triton-windows-3.6.0.post27",
+                            stderr="", returncode=0)
+            return Mock(stdout="Would install triton-windows-3.7.1.post27",
+                        stderr="", returncode=0)
+        return original(cmd, capture_output=capture_output, check=check)
+
+    installer.handler.run_command = Mock(side_effect=with_probe)
+
+
+class TestUpgradeProbe:
+    """The probe must carry the domain constraint and match execution's flags.
+
+    The regression these tests pin: after the one-minor tier fix, an
+    UNCONSTRAINED probe only ever reports the global latest (3.7.1), the
+    filter rejects it, and legitimate within-tier updates (3.6.0.postN)
+    silently become unreachable -- --upgrade says KEEP forever. The failure is
+    a capability evaporating, not an error, so the test must assert an update
+    IS proposed (the inverse test passes on the broken code).
+    """
+
+    def _upgrade_installer(self, mock_installer, recorded):
+        setup_full_mock(mock_installer, "2.10.0+cu130", "13.0", "13.0",
+                        triton_version="3.6.0.post26")
+        mock_installer.upgrade = True
+        _emulate_pip_dry_run(mock_installer, recorded)
+        return mock_installer
+
+    def test_within_tier_update_is_proposed(self, mock_installer):
+        """ANCHOR (red on the unconstrained probe): 3.6.0.post27 must surface."""
+        recorded = []
+        inst = self._upgrade_installer(mock_installer, recorded)
+
+        action = inst.plan_installation().get_action("Triton")
+
+        assert action.action == "UPGRADE", (
+            f"got {action.action} ({action.reason!r}) -- the within-tier update "
+            f"was not proposed; with an unconstrained probe pip reports 3.7.1, "
+            f"the filter rejects it, and upgrades silently freeze"
+        )
+        assert action.target_version == "3.6.0.post27"
+
+    def test_probe_carries_constraint_and_pre_flag(self, mock_installer):
+        """The probe requirement embeds the tier; --pre matches execution's
+        `pip install -U --pre` so pre-release-only updates stay visible."""
+        recorded = []
+        inst = self._upgrade_installer(mock_installer, recorded)
+
+        inst.plan_installation()
+
+        assert recorded, "the upgrade path never ran the probe"
+        probe_cmd = recorded[0]
+        assert "triton-windows>=3.6,<3.7" in probe_cmd, probe_cmd
+        assert "--pre" in probe_cmd, probe_cmd
+
+    def test_out_of_tier_proposal_is_blocked_without_packaging(self, mock_installer):
+        """ANCHOR (red on the except-pass hole): with `packaging` unavailable
+        the filter must still block, not silently self-disable.
+
+        Old behavior: ImportError -> pass -> upgrade_ok stays True -> the plan
+        proposes an out-of-tier Triton on exactly the environments (Portable
+        embedded Python) least likely to have `packaging`.
+        """
+        recorded = []
+        inst = self._upgrade_installer(mock_installer, recorded)
+        # Make the probe return an out-of-tier proposal despite the constraint
+        # (emulates an old/odd pip); the plan-layer filter is the last guard.
+        inst._check_package_update_available = Mock(return_value=(True, "3.7.1.post27"))
+
+        with patch.dict(sys.modules, {"packaging": None,
+                                      "packaging.version": None,
+                                      "packaging.specifiers": None}):
+            action = inst.plan_installation().get_action("Triton")
+
+        assert action.action == "KEEP", (
+            f"got {action.action}: an out-of-tier proposal passed the filter "
+            f"because `packaging` was missing"
+        )
+
+
+class TestVersionSatisfiesConstraint:
+    """Direct tests of the shared filter, both engines."""
+
+    @pytest.mark.parametrize("version,constraint,expected", [
+        ("3.6.0.post27", ">=3.6,<3.7", True),
+        ("3.7.1.post27", ">=3.6,<3.7", False),
+        ("3.7.0", ">=3.7,<3.8", True),
+        ("3.6.0", ">=3.7,<3.8", False),
+        ("3.1.5", "<3.2", True),
+        ("3.2.0", "<3.2", False),
+        ("3.6.0", "", True),          # no constraint: anything passes
+    ])
+    def test_with_packaging(self, mock_installer, version, constraint, expected):
+        assert mock_installer._version_satisfies_constraint(version, constraint) is expected
+
+    @pytest.mark.parametrize("version,constraint,expected", [
+        ("3.6.0.post27", ">=3.6,<3.7", True),
+        ("3.7.1.post27", ">=3.6,<3.7", False),
+        ("3.6.0+git123", ">=3.6,<3.7", True),   # local tag on the minor
+        ("3.6.0", ">=3.6,<4", True),            # bound without minor part
+    ])
+    def test_fallback_without_packaging(self, mock_installer, version, constraint, expected):
+        with patch.dict(sys.modules, {"packaging": None,
+                                      "packaging.version": None,
+                                      "packaging.specifiers": None}):
+            assert mock_installer._version_satisfies_constraint(version, constraint) is expected
+
+    def test_fallback_fails_closed_on_garbage(self, mock_installer):
+        """An unparseable version blocks the proposal (plan says KEEP)."""
+        with patch.dict(sys.modules, {"packaging": None,
+                                      "packaging.version": None,
+                                      "packaging.specifiers": None}):
+            assert mock_installer._version_satisfies_constraint(
+                "garbage", ">=3.6,<3.7") is False
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

@@ -1,0 +1,121 @@
+{
+  "harness": {
+    "name": "mutation_sweep.py",
+    "version": "0.1.0"
+  },
+  "environment": {
+    "python": "3.12.0",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "root": ".",
+    "test_command": [
+      "python",
+      "-m",
+      "pytest",
+      "-q",
+      "tests/unit/test_post_install_verify.py"
+    ],
+    "timestamp": "2026-08-10T22:02:03-04:00"
+  },
+  "results": [
+    {
+      "id": "M1",
+      "file": "comfyui_triton_sageattention.py",
+      "note": "Invert KEEP comparison: unchanged components flagged as deviations, changed ones pass",
+      "verdict": "killed",
+      "restore_ok": true,
+      "output_tail": ""
+    },
+    {
+      "id": "M2",
+      "file": "comfyui_triton_sageattention.py",
+      "note": "Invert change-detection for UPGRADE/FIX/DOWNGRADE: the v0.8.14 phantom-upgrade case now passes",
+      "verdict": "killed",
+      "restore_ok": true,
+      "output_tail": ""
+    },
+    {
+      "id": "M3",
+      "file": "comfyui_triton_sageattention.py",
+      "note": "Invert presence check: successful INSTALL/REINSTALL reported as deviation, absence passes",
+      "verdict": "killed",
+      "restore_ok": true,
+      "output_tail": ""
+    },
+    {
+      "id": "M4",
+      "file": "comfyui_triton_sageattention.py",
+      "note": "Remove scope fence: unverifiable rows (custom nodes) hit getattr(obj, None), aborting mid-check and dropping later findings",
+      "verdict": "killed",
+      "restore_ok": true,
+      "output_tail": ""
+    },
+    {
+      "id": "M5",
+      "file": "comfyui_triton_sageattention.py",
+      "note": "Flip SA failure fence: explained SA absence becomes a false deviation, KEEP rows skipped instead",
+      "verdict": "killed",
+      "restore_ok": true,
+      "output_tail": ""
+    },
+    {
+      "id": "M6",
+      "file": "comfyui_triton_sageattention.py",
+      "note": "Drop negation on authorization gate: unauthorized pip/setuptools drift unchecked, authorized runs falsely policed",
+      "verdict": "killed",
+      "restore_ok": true,
+      "output_tail": ""
+    },
+    {
+      "id": "M7",
+      "file": "comfyui_triton_sageattention.py",
+      "note": "Flip build-tool comparison: unchanged tools flagged as changed, real drift passes",
+      "verdict": "killed",
+      "restore_ok": true,
+      "output_tail": ""
+    },
+    {
+      "id": "M8",
+      "file": "comfyui_triton_sageattention.py",
+      "note": "Swap pre/post sources: INSTALL presence check reads the pre-state, so a fresh install of an absent package deviates",
+      "verdict": "killed",
+      "restore_ok": true,
+      "output_tail": ""
+    },
+    {
+      "id": "M9",
+      "file": "comfyui_triton_sageattention.py",
+      "note": "Invert empty-results guard: any run with checks early-returns 0, killing the deviation-count contract",
+      "verdict": "killed",
+      "restore_ok": true,
+      "output_tail": ""
+    },
+    {
+      "id": "M10",
+      "file": "comfyui_triton_sageattention.py",
+      "note": "Count OKs as deviations: return value and summary line report the complement of the truth",
+      "verdict": "killed",
+      "restore_ok": true,
+      "output_tail": ""
+    },
+    {
+      "id": "M11",
+      "file": "comfyui_triton_sageattention.py",
+      "note": "Probe-failure fence returns a phantom deviation instead of 0 when the environment cannot be read",
+      "verdict": "killed",
+      "restore_ok": true,
+      "output_tail": ""
+    },
+    {
+      "id": "M12",
+      "file": "comfyui_triton_sageattention.py",
+      "note": "Wrong dict value in scope map: SageAttention rows verified against Triton's post-state field",
+      "verdict": "killed",
+      "restore_ok": true,
+      "output_tail": ""
+    }
+  ],
+  "summary": {
+    "killed": 12
+  },
+  "anomalies": []
+}

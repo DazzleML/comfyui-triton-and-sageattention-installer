@@ -35,6 +35,8 @@ sys.path.insert(0, str(Path(__file__).parent))                # sibling test mod
 
 from comfyui_triton_sageattention import (
     ComfyUIInstaller,
+    ComponentAction,
+    InstallPlan,
     PlatformHandler,
     WindowsHandler,
     parse_sage_version,
@@ -476,3 +478,120 @@ def test_env_is_only_created_when_the_command_needs_it(tmp_path, may_create,
         assert handler.environment_type == "system", (
             "a read-only command should fall back to system Python, not build a venv"
         )
+
+
+# ---------------------------------------------------------------------------
+# v0.8.15 -- execution must honor the planned Triton action (the v0.8.14
+# phantom: dryrun claimed UPGRADE forever, install skipped forever)
+# ---------------------------------------------------------------------------
+
+def _triton_exec_installer(mock_installer, action):
+    """Wire a mock installer to execute install_triton() against a given plan.
+
+    The environment probes are pinned as instance attributes so the test
+    exercises DISPATCH, not probing: torch 2.10, Triton 3.6.0.post26 -- a
+    combination the legacy decision block considers compatible, which is
+    exactly why it swallowed the planned UPGRADE in v0.8.14.
+    """
+    inst = mock_installer
+    inst._get_torch_version = lambda: "2.10.0"
+    inst._get_installed_triton_version = lambda: "3.6.0.post26"
+    inst._current_plan = InstallPlan(actions=[action])
+    inst.handler.pip_install.reset_mock()
+    inst.handler.pip_uninstall.reset_mock()
+    return inst
+
+
+def test_planned_triton_upgrade_is_executed(mock_installer):
+    """ANCHOR (red on v0.8.14): a planned UPGRADE must reach pip.
+
+    Live incident 2026-08-10: --upgrade --dryrun said
+    "Triton [UPGRADE] 3.6.0.post26 -> 3.7.1.post27", --upgrade said
+    "compatible - skipping", and a second dryrun said UPGRADE again. The
+    plan consultation at the top of install_triton() short-circuited only
+    on KEEP; every other action fell through to a pre-v0.8.6 decision
+    block that re-decided and refused.
+    """
+    inst = _triton_exec_installer(mock_installer, ComponentAction(
+        component="Triton",
+        action="UPGRADE",
+        current_version="3.6.0.post26",
+        target_version="3.6.0.post27",
+        reason="Update available",
+        details="constraint: >=3.6,<3.7",
+    ))
+
+    inst.install_triton()
+
+    assert inst.handler.pip_install.called, (
+        "plan said UPGRADE but install_triton() performed no pip install -- "
+        "the v0.8.14 phantom upgrade"
+    )
+
+
+def test_planned_triton_keep_is_honored(mock_installer):
+    """INVARIANT GUARD (green before and after): KEEP means no pip calls."""
+    inst = _triton_exec_installer(mock_installer, ComponentAction(
+        component="Triton",
+        action="KEEP",
+        current_version="3.6.0.post26",
+        reason="Compatible",
+    ))
+
+    inst.install_triton()
+
+    assert not inst.handler.pip_install.called
+    assert not inst.handler.pip_uninstall.called
+
+
+def test_planned_triton_fix_uninstalls_then_installs(mock_installer):
+    """A planned FIX replaces the incompatible Triton (uninstall + install)."""
+    inst = _triton_exec_installer(mock_installer, ComponentAction(
+        component="Triton",
+        action="FIX",
+        current_version="3.2.0",
+        reason="Triton 3.2.0 incompatible with PyTorch 2.10",
+    ))
+    inst._get_installed_triton_version = lambda: "3.2.0"
+
+    inst.install_triton()
+
+    assert inst.handler.pip_uninstall.called, "FIX must remove the incompatible Triton"
+    assert inst.handler.pip_install.called, "FIX must install a compatible Triton"
+
+
+def test_planned_triton_install_reaches_pip(mock_installer):
+    """A planned INSTALL (no Triton present) must reach pip."""
+    inst = _triton_exec_installer(mock_installer, ComponentAction(
+        component="Triton",
+        action="INSTALL",
+        reason="Triton not installed",
+    ))
+    inst._get_installed_triton_version = lambda: None
+
+    inst.install_triton()
+
+    assert inst.handler.pip_install.called
+
+
+def test_executed_triton_constraint_matches_plan_resolver(mock_installer):
+    """Same-resolver principle: the constraint execution installs with must be
+    _get_triton_version_constraint(torch), the resolver the planner names --
+    never a re-derivation and never a parse of the display string."""
+    inst = _triton_exec_installer(mock_installer, ComponentAction(
+        component="Triton",
+        action="UPGRADE",
+        current_version="3.6.0.post26",
+        target_version="3.6.0.post27",
+        reason="Update available",
+        details="constraint: >=3.6,<3.7",
+    ))
+
+    inst.install_triton()
+
+    assert inst.handler.pip_install.called
+    packages = inst.handler.pip_install.call_args[0][0]
+    expected = inst._get_triton_version_constraint("2.10.0")
+    assert any(expected in p for p in packages), (
+        f"pip was given {packages}; expected the resolver's constraint {expected!r}"
+    )

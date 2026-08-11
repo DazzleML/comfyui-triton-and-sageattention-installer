@@ -1,0 +1,95 @@
+{
+  "test_command": [
+    "python",
+    "-m",
+    "pytest",
+    "-q",
+    "tests/unit/test_post_install_verify.py"
+  ],
+  "mutations": [
+    {
+      "id": "M1",
+      "file": "comfyui_triton_sageattention.py",
+      "original": "                if kind == \"KEEP\":\r\n                    if post_v == pre:",
+      "mutated": "                if kind == \"KEEP\":\r\n                    if post_v != pre:",
+      "note": "Invert KEEP comparison: unchanged components flagged as deviations, changed ones pass"
+    },
+    {
+      "id": "M2",
+      "file": "comfyui_triton_sageattention.py",
+      "original": "                elif kind in (\"UPGRADE\", \"FIX\", \"DOWNGRADE\"):\r\n                    if post_v != pre:",
+      "mutated": "                elif kind in (\"UPGRADE\", \"FIX\", \"DOWNGRADE\"):\r\n                    if post_v == pre:",
+      "note": "Invert change-detection for UPGRADE/FIX/DOWNGRADE: the v0.8.14 phantom-upgrade case now passes"
+    },
+    {
+      "id": "M3",
+      "file": "comfyui_triton_sageattention.py",
+      "original": "                elif kind in (\"INSTALL\", \"REINSTALL\"):\r\n                    if post_v is not None:",
+      "mutated": "                elif kind in (\"INSTALL\", \"REINSTALL\"):\r\n                    if post_v is None:",
+      "note": "Invert presence check: successful INSTALL/REINSTALL reported as deviation, absence passes"
+    },
+    {
+      "id": "M4",
+      "file": "comfyui_triton_sageattention.py",
+      "original": "                if field is None:\r\n                    continue\r\n                pre = getattr(plan.current, field)",
+      "mutated": "                pre = getattr(plan.current, field)",
+      "note": "Remove scope fence: unverifiable rows (custom nodes) hit getattr(obj, None), aborting mid-check and dropping later findings"
+    },
+    {
+      "id": "M5",
+      "file": "comfyui_triton_sageattention.py",
+      "original": "                if (name == \"SageAttention\" and sage_attention_failed\r\n                        and kind != \"KEEP\"):",
+      "mutated": "                if (name == \"SageAttention\" and sage_attention_failed\r\n                        and kind == \"KEEP\"):",
+      "note": "Flip SA failure fence: explained SA absence becomes a false deviation, KEEP rows skipped instead"
+    },
+    {
+      "id": "M6",
+      "file": "comfyui_triton_sageattention.py",
+      "original": "            if not plan.build_tools_upgrade_needed:",
+      "mutated": "            if plan.build_tools_upgrade_needed:",
+      "note": "Drop negation on authorization gate: unauthorized pip/setuptools drift unchecked, authorized runs falsely policed"
+    },
+    {
+      "id": "M7",
+      "file": "comfyui_triton_sageattention.py",
+      "original": "                    if pre is not None and post_v is not None and pre != post_v:",
+      "mutated": "                    if pre is not None and post_v is not None and pre == post_v:",
+      "note": "Flip build-tool comparison: unchanged tools flagged as changed, real drift passes"
+    },
+    {
+      "id": "M8",
+      "file": "comfyui_triton_sageattention.py",
+      "original": "                pre = getattr(plan.current, field)\r\n                post_v = getattr(post, field)\r\n                name = action.component",
+      "mutated": "                pre = getattr(post, field)\r\n                post_v = getattr(plan.current, field)\r\n                name = action.component",
+      "note": "Swap pre/post sources: INSTALL presence check reads the pre-state, so a fresh install of an absent package deviates"
+    },
+    {
+      "id": "M9",
+      "file": "comfyui_triton_sageattention.py",
+      "original": "        if not results:\r\n            return 0",
+      "mutated": "        if results:\r\n            return 0",
+      "note": "Invert empty-results guard: any run with checks early-returns 0, killing the deviation-count contract"
+    },
+    {
+      "id": "M10",
+      "file": "comfyui_triton_sageattention.py",
+      "original": "        deviations = sum(1 for status, _ in results if status == \"DEVIATION\")",
+      "mutated": "        deviations = sum(1 for status, _ in results if status == \"OK\")",
+      "note": "Count OKs as deviations: return value and summary line report the complement of the truth"
+    },
+    {
+      "id": "M11",
+      "file": "comfyui_triton_sageattention.py",
+      "original": "            self.logger.warning(f\"Post-install verification could not probe the environment: {e}\")\r\n            return 0",
+      "mutated": "            self.logger.warning(f\"Post-install verification could not probe the environment: {e}\")\r\n            return 1",
+      "note": "Probe-failure fence returns a phantom deviation instead of 0 when the environment cannot be read"
+    },
+    {
+      "id": "M12",
+      "file": "comfyui_triton_sageattention.py",
+      "original": "        \"SageAttention\": \"sageattention_version\",",
+      "mutated": "        \"SageAttention\": \"triton_version\",",
+      "note": "Wrong dict value in scope map: SageAttention rows verified against Triton's post-state field"
+    }
+  ]
+}
